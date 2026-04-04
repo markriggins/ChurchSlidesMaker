@@ -164,6 +164,83 @@
       font-size: 12px;
       color: #aaa;
     }
+
+    /* ── Scripture bar ────────────────────────── */
+    .scripture-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px 8px 0 0;
+      padding: 10px 16px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .esv-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fafafa;
+      border: 1px solid #ddd;
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 16px;
+    }
+
+    .esv-row input[type="text"] {
+      flex: 1;
+      max-width: 300px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .scripture-ref {
+      flex: 1;
+      min-width: 160px;
+      max-width: 260px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 13px;
+    }
+
+    button.lookup {
+      padding: 4px 14px;
+      height: 28px;
+      background: #5a9e6a;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    button.lookup:hover   { background: #4a8e5a; }
+    button.lookup:disabled { opacity: .5; cursor: default; }
+
+    .scripture-status {
+      font-size: 12px;
+      color: #888;
+      font-style: italic;
+    }
+    .scripture-status.error { color: #c00; font-style: normal; font-weight: 500; }
+
+    .cb-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -190,6 +267,29 @@
       <option value="flat">Flats (♭)</option>
     </select>
   </div>
+</div>
+
+<!-- Scripture Lookup -->
+<div class="scripture-bar">
+  <span style="color:#555;font-size:14px;font-weight:500;white-space:nowrap">Scripture:</span>
+  <input type="text" class="scripture-ref" id="scriptureRef" placeholder="e.g. Romans 1:11-18">
+  <select id="translation">
+    <option value="esv">ESV</option>
+    <option value="web">WEB (free, no key)</option>
+    <option value="kjv">KJV (free, no key)</option>
+  </select>
+  <button class="lookup" id="scriptureLoad">Look Up</button>
+  <label class="cb-label"><input type="checkbox" id="verseNums" checked> Verse #s</label>
+  <label class="cb-label" title="Capitalizes he/him/his — applied broadly, works best when passage refers mainly to God/Jesus">
+    <input type="checkbox" id="divinePronouns"> He/Him/His ↑
+  </label>
+  <span class="scripture-status" id="scriptureStatus"></span>
+</div>
+<div class="esv-row" id="esvRow">
+  <span>ESV API key:</span>
+  <input type="text" id="esvKey" placeholder="Paste key here — get a free one at api.esv.org">
+  <a href="https://api.esv.org/account/create-application/" target="_blank"
+     style="font-size:12px;color:#4a90e2;white-space:nowrap">Get free key ↗</a>
 </div>
 
 <div class="panels">
@@ -411,6 +511,132 @@ copyBtn.addEventListener('click', () => {
     setTimeout(() => copyHint.textContent = '', 2000);
   });
 });
+
+// ─── Scripture lookup ─────────────────────────────────────────────────────────
+const scriptureRefEl  = document.getElementById('scriptureRef');
+const translationEl   = document.getElementById('translation');
+const scriptureLoadEl = document.getElementById('scriptureLoad');
+const verseNumsEl     = document.getElementById('verseNums');
+const divinePronEl    = document.getElementById('divinePronouns');
+const scriptureStatus = document.getElementById('scriptureStatus');
+const esvKeyEl        = document.getElementById('esvKey');
+const esvRowEl        = document.getElementById('esvRow');
+
+// Persist ESV key across sessions
+const savedKey = localStorage.getItem('esvApiKey') || '';
+if (savedKey) esvKeyEl.value = savedKey;
+esvKeyEl.addEventListener('input', () => localStorage.setItem('esvApiKey', esvKeyEl.value.trim()));
+
+// Show/hide ESV key row based on selected translation
+translationEl.addEventListener('change', () => {
+  esvRowEl.style.display = translationEl.value === 'esv' ? '' : 'none';
+});
+
+function setStatus(msg, isError = false) {
+  scriptureStatus.textContent = msg;
+  scriptureStatus.className = 'scripture-status' + (isError ? ' error' : '');
+}
+
+// Parse ESV API response — it embeds [N] verse number markers in the text
+function parseESVText(raw) {
+  const verses = [];
+  const parts  = raw.split(/\[(\d+)\]/);
+  for (let i = 1; i < parts.length; i += 2) {
+    const text = (parts[i + 1] || '').trim().replace(/\s+/g, ' ');
+    if (text) verses.push({ verse: parseInt(parts[i]), text });
+  }
+  return verses;
+}
+
+// Capitalize he/him/his (lowercase only, so sentence-start capitals are unaffected)
+function capitalizePronouns(text) {
+  return text
+    .replace(/\bhe\b/g,      'He')
+    .replace(/\bhim\b/g,     'Him')
+    .replace(/\bhis\b/g,     'His')
+    .replace(/\bhimself\b/g, 'Himself');
+}
+
+// Wrap a plain text string to maxLen using the existing findSplit logic
+function wrapTextLines(text, maxLen) {
+  const lines = [];
+  let rem = text;
+  while (rem.length > maxLen) {
+    const sp = findSplit(rem, maxLen);
+    if (sp < 0) break;
+    lines.push(rem.slice(0, sp).trimEnd());
+    rem = rem.slice(sp + 1);
+  }
+  if (rem) lines.push(rem.trimEnd());
+  return lines;
+}
+
+// Build formatted scripture text ready to drop into the input textarea
+function formatScripture(verses, canonical, maxLen, showNums, capitalize) {
+  const lines = [];
+  for (const v of verses) {
+    let text = v.text;
+    if (capitalize) text = capitalizePronouns(text);
+    const prefix = showNums ? `${v.verse}: ` : '';
+    lines.push(...wrapTextLines(prefix + text, maxLen));
+  }
+  lines.push(`-- ${canonical}`);
+  return lines.join('\n');
+}
+
+async function lookupScripture() {
+  const ref = scriptureRefEl.value.trim();
+  if (!ref) return;
+  const trans = translationEl.value;
+
+  setStatus('Looking up…');
+  scriptureLoadEl.disabled = true;
+
+  try {
+    let verses, canonical;
+
+    if (trans === 'esv') {
+      const key = esvKeyEl.value.trim();
+      if (!key) { setStatus('Enter your ESV API key below.', true); return; }
+
+      const params = new URLSearchParams({
+        q: ref,
+        'include-headings':            'false',
+        'include-footnotes':           'false',
+        'include-verse-numbers':       'true',
+        'include-short-copyright':     'false',
+        'include-passage-references':  'false',
+      });
+      const resp = await fetch(`https://api.esv.org/v3/passage/text/?${params}`,
+                               { headers: { Authorization: `Token ${key}` } });
+      if (!resp.ok) throw new Error(`ESV API error ${resp.status}`);
+      const data = await resp.json();
+      if (!data.passages?.[0]) throw new Error('Passage not found');
+      verses    = parseESVText(data.passages[0]);
+      canonical = data.canonical || ref;
+
+    } else {
+      const resp = await fetch(`https://bible-api.com/${encodeURIComponent(ref)}?translation=${trans}`);
+      if (!resp.ok) throw new Error(`API error ${resp.status}`);
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      verses    = data.verses.map(v => ({ verse: v.verse, text: v.text.trim().replace(/\s+/g, ' ') }));
+      canonical = data.reference || ref;
+    }
+
+    inputEl.value = formatScripture(verses, canonical, getMaxLen(), verseNumsEl.checked, divinePronEl.checked);
+    updateOutput();
+    setStatus(`Loaded ${canonical}`);
+
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    scriptureLoadEl.disabled = false;
+  }
+}
+
+scriptureLoadEl.addEventListener('click', lookupScripture);
+scriptureRefEl.addEventListener('keydown', e => { if (e.key === 'Enter') lookupScripture(); });
 
 // ─── Resize-to-re-wrap ────────────────────────────────────────────────────────
 // Measure character width for Courier New 13px
