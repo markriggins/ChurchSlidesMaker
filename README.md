@@ -6,10 +6,10 @@ A Google Apps Script sidebar for Google Slides that creates church presentation 
 
 ## What it does
 
-- **Song lyrics** — paste chord+lyric text in chord-above or ChordPro inline `[Chord]` format; the sidebar strips chords from slide bodies, preserves them in speaker notes, and intelligently splits long songs across multiple slides
-- **Scripture** — look up any passage by reference (ESV, WEB, or KJV); the text is fetched server-side (no CORS issues), formatted, and split across slides
+- **Song lyrics** — paste chord+lyric text in chord-above or ChordPro inline `[Chord]` format; chords are stripped from slide bodies and preserved in speaker notes for the worship team
+- **Song library** — search thousands of worship songs with chords from the [mattgraham/worship](https://github.com/mattgraham/worship) OnSong library and load them in one click
+- **Scripture** — look up any passage by reference in KJV, ESV, or WEB; the text is fetched and formatted automatically, with your choice of translation and verse number display
 - **Transpose** — shift chords up or down any number of semitones, with sharps or flats
-- **Song library** — browse and search the [mattgraham/worship](https://github.com/mattgraham/worship) OnSong library directly from the sidebar
 
 Slides are created by duplicating a template slide you choose, so they automatically inherit your presentation's fonts, colors, and background.
 
@@ -27,10 +27,6 @@ Slides are created by duplicating a template slide you choose, so they automatic
 
 > **Note:** If the menu is hidden, widen your browser window — Google Slides collapses menu items into a `…` overflow when the window is narrow.
 
-### ESV API key (optional)
-
-The ESV translation requires a free API key from [api.esv.org](https://api.esv.org). WEB and KJV work without any key.
-
 ---
 
 ## Usage
@@ -39,7 +35,19 @@ The ESV translation requires a free API key from [api.esv.org](https://api.esv.o
 
 Navigate to the slide in your presentation whose background, fonts, and layout you want all new slides to inherit, **then** open the sidebar from the menu. The sidebar captures the current slide as the template when it opens.
 
+### Song library
+
+Thousands of worship songs with chords are available built-in:
+
+1. Expand the **Song Lookup** section (loads the catalog on first open)
+2. Type any part of a song title to filter
+3. Click a song to load it into the Input box
+
+Songs are sourced from the [mattgraham/worship](https://github.com/mattgraham/worship) repository in OnSong/ChordPro format.
+
 ### Song lyrics
+
+You can also paste lyrics directly instead of using the song library:
 
 1. Paste chord+lyric text into the **Input** box — either chord-above format or ChordPro inline `[Chord]lyric` format
 2. The **Output** box shows a preview with chords formatted above lyrics and lines wrapped to the configured width
@@ -47,14 +55,14 @@ Navigate to the slide in your presentation whose background, fonts, and layout y
 
 **What goes where:**
 - Slide body — lyric lines only (chords stripped)
-- Speaker notes — full chord+lyric text (useful for the musician/worship leader)
+- Speaker notes — full chord+lyric text (useful for the worship team)
 
 **Chord format toggle:**
-- *Above lyrics* — chords rendered on a separate line above each lyric line in the output preview and notes
+- *Above lyrics* — chords rendered on a separate line above each lyric line in the output and notes
 - *Inline [chords]* — raw ChordPro notation preserved in notes; output shows lyrics only
 
 **Slide splitting:**
-- Songs break on `[Verse]`, `[Chorus]`, `[Bridge]` and other section labels
+- Songs break at `[Verse]`, `[Chorus]`, `[Bridge]` and other section labels
 - Blank lines in the source force a new slide (use these to mark stanza boundaries)
 - When a section needs multiple slides, lines are distributed evenly (e.g. 8 lines with Lines/slide=6 becomes 4+4, not 6+2)
 - Chord+lyric pairs are never split; a chord line is always kept with its lyric line
@@ -63,16 +71,16 @@ Navigate to the slide in your presentation whose background, fonts, and layout y
 
 1. Expand the **Scripture Lookup** section
 2. Type a reference (e.g. `John 3:16`, `Psalm 23`, `Romans 8:28-39`)
-3. Choose a translation and click **Look Up**
-4. The formatted passage appears in the output — click **▶ Create Slides**
+3. Choose a translation — **KJV**, **ESV**, or **WEB** (see note below)
+4. Click **Look Up**
+5. The formatted passage appears in the output — click **▶ Create Slides**
 
 For multi-verse passages, a reference slide (e.g. *John 3:16–21*) is created first at 1.7× font size, followed by the content slides.
 
-### Song library
-
-1. Expand the **Song Lookup** section (triggers a one-time catalog load)
-2. Type any part of a song title to filter
-3. Click a song to load it into the input box
+**Translation options:**
+- **KJV** (King James Version) — free, no key required
+- **WEB** (World English Bible) — free, no key required
+- **ESV** (English Standard Version) — requires a free API key from [api.esv.org](https://api.esv.org); enter it in the ESV key field
 
 ---
 
@@ -99,9 +107,25 @@ Scripture-specific options (in the Scripture Lookup section):
 
 This project uses [clasp](https://github.com/google/clasp) to sync files between your local machine and Apps Script.
 
+**Install Node.js first** (required for clasp):
+
+```bash
+# macOS — using Homebrew (recommended)
+brew install node
+
+# or download the installer from https://nodejs.org
+```
+
+**Then install clasp and log in:**
+
 ```bash
 npm install -g @google/clasp
 clasp login
+```
+
+**Day-to-day workflow:**
+
+```bash
 clasp push        # upload local changes to Apps Script
 clasp pull        # download changes made in the online editor
 ```
