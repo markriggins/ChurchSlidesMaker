@@ -125,7 +125,7 @@
     }
 
     textarea {
-      resize: both;
+      resize: vertical;
       width: 440px;
       height: 520px;
       outline: none;
@@ -134,6 +134,7 @@
     textarea:focus { border-color: #4a90e2; }
 
     pre {
+      resize: both;
       width: 440px;
       height: 520px;
       overflow: auto;
@@ -252,7 +253,7 @@
   <div class="control">
     <span class="label">Max line length:</span>
     <button class="step" id="lenDown">−</button>
-    <input type="number" id="maxLen" value="35" min="10" max="120">
+    <input type="number" id="maxLen" value="30" min="10" max="120">
     <button class="step" id="lenUp">+</button>
   </div>
 
@@ -294,7 +295,7 @@
 
 <div class="panels">
   <div class="panel">
-    <span class="panel-label">Input — drag corner to resize &amp; re-wrap</span>
+    <span class="panel-label">Input</span>
     <textarea id="input" class="text-mono" placeholder="Paste lyrics with chords here…
 
 Am                    G        Am
@@ -302,7 +303,7 @@ The gates and doors were barred and all the windows fastened down"></textarea>
   </div>
 
   <div class="panel">
-    <span class="panel-label">Output</span>
+    <span class="panel-label">Output — drag corner to adjust width</span>
     <pre id="output" class="text-mono"></pre>
     <div class="copy-row">
       <button class="copy" id="copy">Copy to Clipboard</button>
@@ -542,7 +543,8 @@ function parseESVText(raw) {
   const verses = [];
   const parts  = raw.split(/\[(\d+)\]/);
   for (let i = 1; i < parts.length; i += 2) {
-    const text = (parts[i + 1] || '').trim().replace(/\s+/g, ' ');
+    // Normalize all whitespace including non-breaking spaces (\u00a0)
+    const text = (parts[i + 1] || '').replace(/[\s\u00a0]+/g, ' ').trim();
     if (text) verses.push({ verse: parseInt(parts[i]), text });
   }
   return verses;
@@ -557,12 +559,23 @@ function capitalizePronouns(text) {
     .replace(/\bhimself\b/g, 'Himself');
 }
 
-// Wrap a plain text string to maxLen using the existing findSplit logic
+// Wrap plain text to maxLen — simple last-space split, no phrase-preference bias
 function wrapTextLines(text, maxLen) {
   const lines = [];
-  let rem = text;
+  // Normalize all whitespace (including \u00a0) before wrapping
+  let rem = text.replace(/[\s\u00a0]+/g, ' ').trim();
   while (rem.length > maxLen) {
-    const sp = findSplit(rem, maxLen);
+    // Find the last space at or before maxLen
+    let sp = -1;
+    for (let i = Math.min(maxLen, rem.length - 1); i >= 1; i--) {
+      if (rem[i] === ' ') { sp = i; break; }
+    }
+    // No space before maxLen? Break at the first space after
+    if (sp < 0) {
+      for (let i = maxLen + 1; i < rem.length; i++) {
+        if (rem[i] === ' ') { sp = i; break; }
+      }
+    }
     if (sp < 0) break;
     lines.push(rem.slice(0, sp).trimEnd());
     rem = rem.slice(sp + 1);
@@ -654,14 +667,14 @@ const CHAR_W    = measureCharWidth();
 const PAD_H     = 24; // left + right padding = 12 * 2
 
 const ro = new ResizeObserver(() => {
-  const innerW = inputEl.clientWidth - PAD_H;
+  const innerW = outputEl.clientWidth - PAD_H;
   const cols   = Math.max(10, Math.round(innerW / CHAR_W));
   if (parseInt(maxLenEl.value) !== cols) {
     maxLenEl.value = cols;
     updateOutput();
   }
 });
-ro.observe(inputEl);
+ro.observe(outputEl);
 </script>
 </body>
 </html>
