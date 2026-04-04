@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lyrics Wrapper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #f0f0f0;
+      color: #222;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin: 0 0 20px;
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    /* ── Toolbar ──────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
+
+    .control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+    }
+
+    .control span.label {
+      color: #555;
+      white-space: nowrap;
+    }
+
+    button.step {
+      width: 26px;
+      height: 26px;
+      border: 1px solid #ccc;
+      background: #f8f8f8;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    button.step:hover { background: #e8e8e8; }
+
+    input[type="number"] {
+      width: 52px;
+      text-align: center;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 3px 4px;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .trans-val {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      min-width: 38px;
+      text-align: center;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 3px 4px;
+      background: white;
+    }
+
+    select {
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 3px 6px;
+      font-size: 13px;
+      background: white;
+    }
+
+    /* ── Panels ───────────────────────────── */
+    .panels {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #888;
+    }
+
+    /* shared text style */
+    .text-mono {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 12px;
+      background: white;
+    }
+
+    textarea {
+      resize: both;
+      width: 440px;
+      height: 520px;
+      outline: none;
+      color: #222;
+    }
+    textarea:focus { border-color: #4a90e2; }
+
+    pre {
+      width: 440px;
+      height: 520px;
+      overflow: auto;
+      margin: 0;
+      white-space: pre;
+      color: #222;
+    }
+
+    /* ── Copy button ──────────────────────── */
+    .copy-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button.copy {
+      padding: 6px 18px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.copy:hover { background: #357abd; }
+
+    .hint {
+      font-size: 12px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Lyrics Wrapper</h1>
+
+<div class="toolbar">
+  <!-- Max line length -->
+  <div class="control">
+    <span class="label">Max line length:</span>
+    <button class="step" id="lenDown">−</button>
+    <input type="number" id="maxLen" value="35" min="10" max="120">
+    <button class="step" id="lenUp">+</button>
+  </div>
+
+  <!-- Transpose -->
+  <div class="control">
+    <span class="label">Transpose:</span>
+    <button class="step" id="transDown">−</button>
+    <span class="trans-val" id="transVal">0</span>
+    <button class="step" id="transUp">+</button>
+    <select id="accidentals" title="Prefer sharps or flats when transposing">
+      <option value="sharp">Sharps (#)</option>
+      <option value="flat">Flats (♭)</option>
+    </select>
+  </div>
+</div>
+
+<div class="panels">
+  <div class="panel">
+    <span class="panel-label">Input — drag corner to resize &amp; re-wrap</span>
+    <textarea id="input" class="text-mono" placeholder="Paste lyrics with chords here…
+
+Am                    G        Am
+The gates and doors were barred and all the windows fastened down"></textarea>
+  </div>
+
+  <div class="panel">
+    <span class="panel-label">Output</span>
+    <pre id="output" class="text-mono"></pre>
+    <div class="copy-row">
+      <button class="copy" id="copy">Copy to Clipboard</button>
+      <span class="hint" id="copyHint"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Note tables ──────────────────────────────────────────────────────────────
+const SHARPS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const FLATS  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+
+function noteIndex(n) {
+  const i = SHARPS.indexOf(n);
+  return i >= 0 ? i : FLATS.indexOf(n);
+}
+
+function transposeNote(note, steps, useFlats) {
+  const idx = noteIndex(note);
+  if (idx < 0) return note;
+  return (useFlats ? FLATS : SHARPS)[((idx + steps) % 12 + 12) % 12];
+}
+
+function transposeChordToken(token, steps, useFlats) {
+  if (steps === 0) return token;
+  // Handle slash bass note:  Am/E  →  transpose both parts
+  const slashAt = token.indexOf('/', 1);
+  if (slashAt > 0) {
+    const main = token.slice(0, slashAt);
+    const bass = token.slice(slashAt + 1);
+    return transposeChordToken(main, steps, useFlats) +
+           '/' + transposeChordToken(bass, steps, useFlats);
+  }
+  // Root is up to 2 chars: letter + optional #/b
+  const hasAcc = token.length > 1 && (token[1] === '#' || token[1] === 'b');
+  const root   = hasAcc ? token.slice(0, 2) : token[0];
+  const rest   = token.slice(root.length);
+  return transposeNote(root, steps, useFlats) + rest;
+}
+
+function transposeChordLine(line, steps, useFlats) {
+  if (steps === 0) return line;
+  // Replace every non-space run (chord token) in the line
+  return line.replace(/[^\s]+/g, tok => transposeChordToken(tok, steps, useFlats));
+}
+
+// ─── Chord-line detection ─────────────────────────────────────────────────────
+const CHORD_PAT = /^[A-G][#b]?(m(aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
+
+function isChordLine(line) {
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every(w => CHORD_PAT.test(w));
+}
+
+// ─── Natural split point ──────────────────────────────────────────────────────
+const CONJUNCTIONS = new Set([
+  'and','but','or','so','yet','for','nor','because','although',
+  'while','when','if','as','since','though','until','unless','where'
+]);
+const PREPOSITIONS = new Set([
+  'in','on','at','to','from','with','by','of','about','through',
+  'into','over','under','before','after','between','among','upon','across'
+]);
+
+function findSplit(lyric, maxLen) {
+  if (lyric.length <= maxLen) return -1;
+
+  let punct = -1, conj = -1, prep = -1, space = -1;
+  const min = Math.max(5, Math.floor(maxLen * 0.35));
+
+  for (let i = Math.min(maxLen, lyric.length - 1); i >= min; i--) {
+    if (lyric[i] !== ' ') continue;
+    if (space < 0) space = i;
+    if (punct < 0 && i > 0 && /[,;:]/.test(lyric[i - 1])) punct = i;
+    const word = (lyric.slice(i + 1).match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
+    if (conj < 0 && CONJUNCTIONS.has(word)) conj = i;
+    if (prep < 0 && PREPOSITIONS.has(word)) prep = i;
+  }
+
+  if (punct < 0 && conj < 0 && prep < 0 && space < 0) {
+    // Forced split: find first space past maxLen
+    for (let i = maxLen + 1; i < lyric.length; i++)
+      if (lyric[i] === ' ') return i;
+    return -1; // one very long word — can't split
+  }
+
+  return punct >= 0 ? punct : conj >= 0 ? conj : prep >= 0 ? prep : space;
+}
+
+// ─── Wrap a (chord, lyric) pair into multiple shorter pairs ───────────────────
+function wrapPair(chord, lyric, maxLen) {
+  const out = [];
+  let ch = chord.padEnd(Math.max(chord.length, lyric.length));
+  let ly = lyric;
+
+  while (ly.length > maxLen) {
+    const sp = findSplit(ly, maxLen);
+    if (sp < 0) break;
+
+    out.push([ch.slice(0, sp).trimEnd(), ly.slice(0, sp).trimEnd()]);
+    ch = ch.slice(sp + 1);
+    ly = ly.slice(sp + 1);
+    // Re-pad chord to lyric length for next iteration
+    if (ch.length < ly.length) ch = ch.padEnd(ly.length);
+  }
+
+  out.push([ch.trimEnd(), ly.trimEnd()]);
+  return out;
+}
+
+// ─── Main processor ───────────────────────────────────────────────────────────
+function process(input, maxLen, transposeSteps, useFlats) {
+  const lines = input.split('\n');
+  const out   = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (!line.trim()) { out.push(''); i++; continue; }
+
+    if (isChordLine(line)) {
+      const chordLine = transposeChordLine(line, transposeSteps, useFlats);
+      const nextLine  = (i + 1 < lines.length) ? lines[i + 1] : '';
+
+      if (nextLine && !isChordLine(nextLine) && nextLine.trim()) {
+        // chord + lyric pair
+        for (const [c, l] of wrapPair(chordLine, nextLine, maxLen)) {
+          if (c) out.push(c);
+          out.push(l);
+        }
+        i += 2;
+      } else {
+        // standalone chord line (e.g. at end of song)
+        out.push(chordLine);
+        i++;
+      }
+    } else {
+      // lyric with no chord above
+      for (const [c, l] of wrapPair('', line, maxLen)) {
+        if (c) out.push(c);
+        out.push(l);
+      }
+      i++;
+    }
+  }
+
+  return out.join('\n');
+}
+
+// ─── UI wiring ────────────────────────────────────────────────────────────────
+const inputEl    = document.getElementById('input');
+const outputEl   = document.getElementById('output');
+const maxLenEl   = document.getElementById('maxLen');
+const transValEl = document.getElementById('transVal');
+const accEl      = document.getElementById('accidentals');
+const copyBtn    = document.getElementById('copy');
+const copyHint   = document.getElementById('copyHint');
+
+let transposeSteps = 0;
+
+function getMaxLen()  { return Math.max(10, parseInt(maxLenEl.value) || 35); }
+function getUseFlats(){ return accEl.value === 'flat'; }
+
+function updateOutput() {
+  outputEl.textContent = process(
+    inputEl.value,
+    getMaxLen(),
+    transposeSteps,
+    getUseFlats()
+  );
+}
+
+// Max-length buttons
+document.getElementById('lenDown').addEventListener('click', () => {
+  maxLenEl.value = Math.max(10, getMaxLen() - 1);
+  updateOutput();
+});
+document.getElementById('lenUp').addEventListener('click', () => {
+  maxLenEl.value = Math.min(120, getMaxLen() + 1);
+  updateOutput();
+});
+maxLenEl.addEventListener('input', updateOutput);
+
+// Transpose buttons
+document.getElementById('transDown').addEventListener('click', () => {
+  transposeSteps--;
+  transValEl.textContent = transposeSteps >= 0 ? '+' + transposeSteps : transposeSteps;
+  updateOutput();
+});
+document.getElementById('transUp').addEventListener('click', () => {
+  transposeSteps++;
+  transValEl.textContent = transposeSteps >= 0 ? '+' + transposeSteps : transposeSteps;
+  updateOutput();
+});
+accEl.addEventListener('change', updateOutput);
+
+// Live update as user types
+inputEl.addEventListener('input', updateOutput);
+
+// Copy
+copyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(outputEl.textContent).then(() => {
+    copyHint.textContent = 'Copied!';
+    setTimeout(() => copyHint.textContent = '', 2000);
+  });
+});
+
+// ─── Resize-to-re-wrap ────────────────────────────────────────────────────────
+// Measure character width for Courier New 13px
+function measureCharWidth() {
+  const s = document.createElement('span');
+  s.style.cssText = "font-family:'Courier New',monospace;font-size:13px;position:absolute;visibility:hidden;white-space:pre";
+  s.textContent = 'x'.repeat(200);
+  document.body.appendChild(s);
+  const w = s.getBoundingClientRect().width / 200;
+  document.body.removeChild(s);
+  return w;
+}
+
+const CHAR_W    = measureCharWidth();
+const PAD_H     = 24; // left + right padding = 12 * 2
+
+const ro = new ResizeObserver(() => {
+  const innerW = inputEl.clientWidth - PAD_H;
+  const cols   = Math.max(10, Math.round(innerW / CHAR_W));
+  if (parseInt(maxLenEl.value) !== cols) {
+    maxLenEl.value = cols;
+    updateOutput();
+  }
+});
+ro.observe(inputEl);
+</script>
+</body>
+</html>
