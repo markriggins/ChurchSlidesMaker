@@ -13,9 +13,9 @@ A Google Apps Script sidebar for Google Slides that creates church presentation 
 
 Slides are created by duplicating a template slide you choose, so they automatically inherit your presentation's fonts, colors, and background.
 
-| Side panel | Generated slides | Presenter view |
-|:---:|:---:|:---:|
-| ![Side panel](docs/SidePanel.png) | ![Generated slides](docs/Slides.png) | ![Presenter view](docs/PresentationView.png) |
+| Side panel | Generated slides |
+|:---:|:---:|
+| ![Side panel](docs/SidePanel.png) | ![Generated slides](docs/Slides.png) |
 
 ---
 
@@ -70,6 +70,10 @@ You can also paste lyrics directly instead of using the song library:
 - Blank lines in the source force a new slide (use these to mark stanza boundaries)
 - When a section needs multiple slides, lines are distributed evenly (e.g. 8 lines with Lines/slide=6 becomes 4+4, not 6+2)
 - Chord+lyric pairs are never split; a chord line is always kept with its lyric line
+
+**During the presentation**, the worship team can follow along using Google Slides Presenter View — lyrics appear on screen for the congregation while chords and full text show in the speaker notes.
+
+![Presenter view showing lyrics on slide and chords in speaker notes](docs/PresentationView.png)
 
 ### Scripture
 
