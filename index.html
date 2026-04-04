@@ -513,7 +513,17 @@ copyBtn.addEventListener('click', () => {
   });
 });
 
-// ─── Scripture lookup ─────────────────────────────────────────────────────────
+// ─── Scripture lookup ──────────────────────────────────────────────────────────
+// Cache the last-fetched verses so checkboxes can re-format without re-fetching
+let lastVerses   = null;
+let lastCanonical = '';
+
+function reloadFromCache() {
+  if (!lastVerses) return;
+  inputEl.value = formatScripture(lastVerses, lastCanonical, getMaxLen(), verseNumsEl.checked, divinePronEl.checked);
+  updateOutput();
+}
+
 const scriptureRefEl  = document.getElementById('scriptureRef');
 const translationEl   = document.getElementById('translation');
 const scriptureLoadEl = document.getElementById('scriptureLoad');
@@ -637,6 +647,8 @@ async function lookupScripture() {
       canonical = data.reference || ref;
     }
 
+    lastVerses    = verses;
+    lastCanonical = canonical;
     inputEl.value = formatScripture(verses, canonical, getMaxLen(), verseNumsEl.checked, divinePronEl.checked);
     updateOutput();
     setStatus(`Loaded ${canonical}`);
@@ -650,6 +662,10 @@ async function lookupScripture() {
 
 scriptureLoadEl.addEventListener('click', lookupScripture);
 scriptureRefEl.addEventListener('keydown', e => { if (e.key === 'Enter') lookupScripture(); });
+
+// Re-format instantly when checkboxes change (no re-fetch needed)
+verseNumsEl.addEventListener('change', reloadFromCache);
+divinePronEl.addEventListener('change', reloadFromCache);
 
 // ─── Resize-to-re-wrap ────────────────────────────────────────────────────────
 // Measure character width for Courier New 13px
