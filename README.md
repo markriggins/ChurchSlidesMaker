@@ -23,7 +23,14 @@ Slides are created by duplicating a template slide you choose, so they automatic
 
 ### Choosing a template slide
 
-Navigate to the slide in your presentation whose background, fonts, and layout you want all new slides to inherit, **then** open the sidebar from the menu. The sidebar captures the current slide as the template when it opens.
+Before creating slides you need a **template slide** — a slide you design once that all generated slides will be copied from. It must contain at least one text box, which is where the lyrics or scripture text will be placed.
+
+Design your template slide with:
+- The **background** you want (photo, solid color, gradient, etc.)
+- The **font, size, and color** for the lyric/scripture text
+- A **text box** sized and positioned where you want the words to appear
+
+Navigate to that slide in your presentation, **then** open the sidebar from the ChurchSlidesMaker menu. The sidebar captures the current slide as the template at the moment it opens — every slide created in that session will be a copy of it, inheriting its background, font, and text size.
 
 ### Song library
 
