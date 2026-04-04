@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      margin: 0;
+      padding: 8px;
+      color: #222;
+      background: #fff;
+    }
+
+    h1 {
+      font-size: 14px;
+      font-weight: 700;
+      margin: 0 0 10px;
+      color: #333;
+    }
+
+    /* ── Sections ── */
+    .section {
+      border: 1px solid #e0e0e0;
+      border-radius: 5px;
+      margin-bottom: 8px;
+      overflow: hidden;
+    }
+    .section-head {
+      background: #f5f5f5;
+      padding: 5px 8px;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: #555;
+      cursor: pointer;
+      user-select: none;
+    }
+    .section-head:hover { background: #ececec; }
+    .section-body { padding: 8px; }
+
+    /* ── Form controls ── */
+    input[type="text"], input[type="number"], select, textarea {
+      font-family: inherit;
+      font-size: 12px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 3px 5px;
+    }
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    textarea:focus { outline: none; border-color: #4a90e2; }
+
+    input[type="number"] {
+      width: 42px;
+      text-align: center;
+      font-family: 'Courier New', monospace;
+    }
+
+    textarea {
+      width: 100%;
+      resize: vertical;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    pre {
+      width: 100%;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre;
+      overflow: auto;
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 3px;
+      padding: 6px;
+      margin: 0;
+      min-height: 80px;
+      max-height: 320px;
+    }
+
+    select { padding: 3px 4px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 4px 10px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .btn-blue   { background: #4a90e2; color: #fff; }
+    .btn-blue:hover:not(:disabled)   { background: #357abd; }
+    .btn-green  { background: #5a9e6a; color: #fff; }
+    .btn-green:hover:not(:disabled)  { background: #4a8e5a; }
+    .btn-sm {
+      width: 22px; height: 22px;
+      padding: 0; font-size: 14px; line-height: 1;
+      border: 1px solid #ccc; background: #f8f8f8;
+      border-radius: 3px; cursor: pointer;
+    }
+    .btn-sm:hover { background: #e8e8e8; }
+
+    /* ── Row / label helpers ── */
+    .row   { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; flex-wrap: wrap; }
+    .row:last-child { margin-bottom: 0; }
+    .lbl   { color: #555; white-space: nowrap; }
+    .cb-lbl { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+    .val   { font-family: 'Courier New', monospace; min-width: 28px; text-align: center;
+             border: 1px solid #ccc; border-radius: 3px; padding: 2px 3px; background: #fff; }
+
+    /* ── Status ── */
+    .status { font-size: 11px; color: #777; font-style: italic; margin-top: 4px; min-height: 14px; }
+    .status.err { color: #c00; font-style: normal; font-weight: 500; }
+
+    /* ── Create Slides button ── */
+    #createBtn { width: 100%; padding: 8px; font-size: 13px; font-weight: 600; margin-top: 2px; }
+    #createStatus { margin-top: 5px; }
+  </style>
+</head>
+<body>
+
+<h1>Lyrics Wrapper</h1>
+
+<!-- ── Scripture ─────────────────────────────────────── -->
+<div class="section">
+  <div class="section-head" onclick="toggle(this)">📖 Scripture Lookup</div>
+  <div class="section-body">
+    <div class="row">
+      <input type="text" id="scriptureRef" placeholder="e.g. John 3:16-20" style="flex:1;min-width:0">
+      <button class="btn btn-blue" id="lookupBtn" onclick="lookupScripture()">Look Up</button>
+    </div>
+    <div class="row">
+      <span class="lbl">Translation:</span>
+      <select id="translation" onchange="onTranslationChange()">
+        <option value="esv">ESV</option>
+        <option value="web">WEB (free)</option>
+        <option value="kjv">KJV (free)</option>
+      </select>
+      <label class="cb-lbl"><input type="checkbox" id="verseNums" checked onchange="reloadFromCache()"> Verse #s</label>
+      <label class="cb-lbl" title="Capitalizes he/him/his — works best in passages mainly about God/Jesus">
+        <input type="checkbox" id="divinePronouns" onchange="reloadFromCache()"> He/Him
+      </label>
+    </div>
+    <div class="row" id="esvKeyRow">
+      <span class="lbl">ESV key:</span>
+      <input type="text" id="esvKey" placeholder="api.esv.org" style="flex:1;min-width:0" oninput="saveKey()">
+    </div>
+    <div class="status" id="scriptureStatus"></div>
+  </div>
+</div>
+
+<!-- ── Settings ──────────────────────────────────────── -->
+<div class="section">
+  <div class="section-head" onclick="toggle(this)">⚙️ Settings</div>
+  <div class="section-body">
+    <div class="row">
+      <span class="lbl">Max length:</span>
+      <button class="btn-sm" onclick="adjustLen(-1)">−</button>
+      <input type="number" id="maxLen" value="30" min="10" max="120" oninput="updateOutput()">
+      <button class="btn-sm" onclick="adjustLen(1)">+</button>
+    </div>
+    <div class="row">
+      <span class="lbl">Transpose:</span>
+      <button class="btn-sm" onclick="adjustTrans(-1)">−</button>
+      <span class="val" id="transVal">0</span>
+      <button class="btn-sm" onclick="adjustTrans(1)">+</button>
+      <select id="accidentals" onchange="updateOutput()">
+        <option value="sharp">Sharps (#)</option>
+        <option value="flat">Flats (♭)</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- ── Input ─────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-head" onclick="toggle(this)">✏️ Input</div>
+  <div class="section-body">
+    <textarea id="input" rows="8" placeholder="Paste chord+lyrics here, or use Scripture Lookup above.
+
+Am                G        Am
+The gates and doors were barred
+and all the windows fastened down" oninput="updateOutput()"></textarea>
+  </div>
+</div>
+
+<!-- ── Output ────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-head" onclick="toggle(this)">📄 Output</div>
+  <div class="section-body">
+    <pre id="output"></pre>
+    <div class="row" style="margin-top:6px">
+      <button class="btn btn-blue" onclick="copyOutput()">Copy</button>
+      <span class="status" id="copyHint" style="font-style:normal"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Create Slides ──────────────────────────────────── -->
+<button class="btn btn-green" id="createBtn" onclick="createSlides()">▶ Create Slides</button>
+<div class="status" id="createStatus"></div>
+
+<script>
+// ─── Note tables ──────────────────────────────────────────────────────────────
+var SHARPS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+var FLATS  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+
+function noteIndex(n) {
+  var i = SHARPS.indexOf(n);
+  return i >= 0 ? i : FLATS.indexOf(n);
+}
+function transposeNote(note, steps, useFlats) {
+  var idx = noteIndex(note);
+  if (idx < 0) return note;
+  return (useFlats ? FLATS : SHARPS)[((idx + steps) % 12 + 12) % 12];
+}
+function transposeChordToken(token, steps, useFlats) {
+  if (steps === 0) return token;
+  var slash = token.indexOf('/', 1);
+  if (slash > 0) {
+    return transposeChordToken(token.slice(0, slash), steps, useFlats) +
+           '/' + transposeChordToken(token.slice(slash + 1), steps, useFlats);
+  }
+  var hasAcc = token.length > 1 && (token[1] === '#' || token[1] === 'b');
+  var root = hasAcc ? token.slice(0, 2) : token[0];
+  return transposeNote(root, steps, useFlats) + token.slice(root.length);
+}
+function transposeChordLine(line, steps, useFlats) {
+  if (steps === 0) return line;
+  return line.replace(/[^\s]+/g, function(t) { return transposeChordToken(t, steps, useFlats); });
+}
+
+// ─── Chord detection ──────────────────────────────────────────────────────────
+var CHORD_PAT = /^[A-G][#b]?(m(aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
+function isChordLine(line) {
+  var words = line.trim().split(/\s+/).filter(Boolean);
+  return words.length > 0 && words.every(function(w) { return CHORD_PAT.test(w); });
+}
+
+// ─── Split point ──────────────────────────────────────────────────────────────
+var CONJ = new Set(['and','but','or','so','yet','for','nor','because','although',
+                    'while','when','if','as','since','though','until','unless','where']);
+var PREP = new Set(['in','on','at','to','from','with','by','of','about','through',
+                    'into','over','under','before','after','between','among','upon','across']);
+
+function findSplit(lyric, maxLen) {
+  if (lyric.length <= maxLen) return -1;
+  var punct = -1, conj = -1, prep = -1, space = -1;
+  var min = Math.max(5, Math.floor(maxLen * 0.35));
+  for (var i = Math.min(maxLen, lyric.length - 1); i >= min; i--) {
+    if (lyric[i] !== ' ') continue;
+    if (space < 0) space = i;
+    if (punct < 0 && i > 0 && /[,;:]/.test(lyric[i - 1])) punct = i;
+    var word = (lyric.slice(i + 1).match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
+    if (conj < 0 && CONJ.has(word)) conj = i;
+    if (prep < 0 && PREP.has(word)) prep = i;
+  }
+  if (punct < 0 && conj < 0 && prep < 0 && space < 0) {
+    for (var j = maxLen + 1; j < lyric.length; j++) if (lyric[j] === ' ') return j;
+    return -1;
+  }
+  return punct >= 0 ? punct : conj >= 0 ? conj : prep >= 0 ? prep : space;
+}
+
+// ─── Wrap chord+lyric pair ────────────────────────────────────────────────────
+function wrapPair(chord, lyric, maxLen) {
+  var out = [];
+  var ch = chord.padEnd(Math.max(chord.length, lyric.length));
+  var ly = lyric;
+  while (ly.length > maxLen) {
+    var sp = findSplit(ly, maxLen);
+    if (sp < 0) break;
+    out.push([ch.slice(0, sp).trimEnd(), ly.slice(0, sp).trimEnd()]);
+    ch = ch.slice(sp + 1);
+    ly = ly.slice(sp + 1);
+    if (ch.length < ly.length) ch = ch.padEnd(ly.length);
+  }
+  out.push([ch.trimEnd(), ly.trimEnd()]);
+  return out;
+}
+
+// ─── Main process ─────────────────────────────────────────────────────────────
+function process(input, maxLen, transposeSteps, useFlats) {
+  var lines = input.split('\n');
+  var out = [];
+  var i = 0;
+  while (i < lines.length) {
+    var line = lines[i];
+    if (!line.trim()) { out.push(''); i++; continue; }
+    if (isChordLine(line)) {
+      var chordLine = transposeChordLine(line, transposeSteps, useFlats);
+      var nextLine = (i + 1 < lines.length) ? lines[i + 1] : '';
+      if (nextLine && !isChordLine(nextLine) && nextLine.trim()) {
+        wrapPair(chordLine, nextLine, maxLen).forEach(function(p) {
+          if (p[0]) out.push(p[0]);
+          out.push(p[1]);
+        });
+        i += 2;
+      } else {
+        out.push(chordLine); i++;
+      }
+    } else {
+      wrapPair('', line, maxLen).forEach(function(p) {
+        if (p[0]) out.push(p[0]);
+        out.push(p[1]);
+      });
+      i++;
+    }
+  }
+  return out.join('\n');
+}
+
+// ─── Scripture formatting ─────────────────────────────────────────────────────
+function capitalizePronouns(text) {
+  return text.replace(/\bhe\b/g,'He').replace(/\bhim\b/g,'Him')
+             .replace(/\bhis\b/g,'His').replace(/\bhimself\b/g,'Himself');
+}
+function wrapTextLines(text, maxLen) {
+  var lines = [];
+  var rem = text.replace(/[\s\u00a0]+/g, ' ').trim();
+  while (rem.length > maxLen) {
+    var sp = -1;
+    for (var i = Math.min(maxLen, rem.length - 1); i >= 1; i--) {
+      if (rem[i] === ' ') { sp = i; break; }
+    }
+    if (sp < 0) {
+      for (var j = maxLen + 1; j < rem.length; j++) { if (rem[j] === ' ') { sp = j; break; } }
+    }
+    if (sp < 0) break;
+    lines.push(rem.slice(0, sp).trimEnd());
+    rem = rem.slice(sp + 1);
+  }
+  if (rem) lines.push(rem.trimEnd());
+  return lines;
+}
+function formatScripture(verses, canonical, maxLen, showNums, capitalize) {
+  var lines = [];
+  verses.forEach(function(v) {
+    var text = capitalize ? capitalizePronouns(v.text) : v.text;
+    var prefix = showNums ? (v.verse + ': ') : '';
+    wrapTextLines(prefix + text, maxLen).forEach(function(l) { lines.push(l); });
+  });
+  lines.push('-- ' + canonical);
+  return lines.join('\n');
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+var transposeSteps = 0;
+var lastVerses = null;
+var lastCanonical = '';
+
+function getMaxLen()   { return Math.max(10, parseInt(document.getElementById('maxLen').value) || 30); }
+function getUseFlats() { return document.getElementById('accidentals').value === 'flat'; }
+
+function updateOutput() {
+  document.getElementById('output').textContent = process(
+    document.getElementById('input').value,
+    getMaxLen(), transposeSteps, getUseFlats()
+  );
+}
+
+function adjustLen(d) {
+  var el = document.getElementById('maxLen');
+  el.value = Math.max(10, Math.min(120, getMaxLen() + d));
+  updateOutput();
+}
+function adjustTrans(d) {
+  transposeSteps += d;
+  var el = document.getElementById('transVal');
+  el.textContent = transposeSteps >= 0 ? '+' + transposeSteps : transposeSteps;
+  updateOutput();
+}
+
+// ─── Scripture lookup ─────────────────────────────────────────────────────────
+var savedKey = localStorage.getItem('esvApiKey') || '';
+if (savedKey) document.getElementById('esvKey').value = savedKey;
+
+function saveKey() {
+  localStorage.setItem('esvApiKey', document.getElementById('esvKey').value.trim());
+}
+function onTranslationChange() {
+  var isEsv = document.getElementById('translation').value === 'esv';
+  document.getElementById('esvKeyRow').style.display = isEsv ? '' : 'none';
+}
+
+function setScriptureStatus(msg, isErr) {
+  var el = document.getElementById('scriptureStatus');
+  el.textContent = msg;
+  el.className = 'status' + (isErr ? ' err' : '');
+}
+function reloadFromCache() {
+  if (!lastVerses) return;
+  document.getElementById('input').value = formatScripture(
+    lastVerses, lastCanonical, getMaxLen(),
+    document.getElementById('verseNums').checked,
+    document.getElementById('divinePronouns').checked
+  );
+  updateOutput();
+}
+
+function lookupScripture() {
+  var ref   = document.getElementById('scriptureRef').value.trim();
+  var trans = document.getElementById('translation').value;
+  var key   = document.getElementById('esvKey').value.trim();
+  if (!ref) return;
+
+  setScriptureStatus('Looking up…');
+  document.getElementById('lookupBtn').disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(result) {
+      lastVerses    = result.verses;
+      lastCanonical = result.canonical;
+      document.getElementById('input').value = formatScripture(
+        result.verses, result.canonical, getMaxLen(),
+        document.getElementById('verseNums').checked,
+        document.getElementById('divinePronouns').checked
+      );
+      updateOutput();
+      setScriptureStatus('Loaded ' + result.canonical);
+      document.getElementById('lookupBtn').disabled = false;
+    })
+    .withFailureHandler(function(e) {
+      setScriptureStatus(e.message, true);
+      document.getElementById('lookupBtn').disabled = false;
+    })
+    .fetchScripture(ref, trans, key);
+}
+
+// ─── Copy output ──────────────────────────────────────────────────────────────
+function copyOutput() {
+  var el = document.getElementById('output');
+  var range = document.createRange();
+  range.selectNodeContents(el);
+  var sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.execCommand('copy');
+  sel.removeAllRanges();
+  var hint = document.getElementById('copyHint');
+  hint.textContent = 'Copied!';
+  setTimeout(function() { hint.textContent = ''; }, 2000);
+}
+
+// ─── Create Slides ────────────────────────────────────────────────────────────
+function createSlides() {
+  var text = document.getElementById('output').textContent.trim();
+  if (!text) { setCreateStatus('Nothing to create — output is empty.', true); return; }
+
+  setCreateStatus('Creating slides…');
+  document.getElementById('createBtn').disabled = true;
+
+  google.script.run
+    .withSuccessHandler(function(n) {
+      setCreateStatus('Done — created ' + n + ' slide(s).');
+      document.getElementById('createBtn').disabled = false;
+    })
+    .withFailureHandler(function(e) {
+      setCreateStatus(e.message, true);
+      document.getElementById('createBtn').disabled = false;
+    })
+    .createVerseSlides(text);
+}
+function setCreateStatus(msg, isErr) {
+  var el = document.getElementById('createStatus');
+  el.textContent = msg;
+  el.className = 'status' + (isErr ? ' err' : '');
+}
+
+// ─── Collapsible sections ─────────────────────────────────────────────────────
+function toggle(head) {
+  var body = head.nextElementSibling;
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+</script>
+</body>
+</html>
