@@ -47,6 +47,8 @@ Thousands of worship songs with chords are available built-in:
 2. Type any part of a song title to filter
 3. Click a song to load it into the Input box
 
+![Song lookup showing searchable list of thousands of worship songs](docs/SongLookup.png)
+
 Songs are sourced from the [mattgraham/worship](https://github.com/mattgraham/worship) repository in OnSong/ChordPro format.
 
 ### Song lyrics
