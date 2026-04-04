@@ -94,15 +94,19 @@ function parseESVText_(raw) {
 const GITHUB_HEADERS = { 'User-Agent': 'ChurchSlidesMaker' };
 
 function fetchSongList() {
-  // Use the recursive git tree API — one request for the full file list.
+  // Cache the list for 6 hours to avoid GitHub API rate limits (60 req/hr unauthenticated).
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('songList');
+  if (cached) return JSON.parse(cached);
+
   const resp = UrlFetchApp.fetch(
     'https://api.github.com/repos/mattgraham/worship/git/trees/HEAD?recursive=1',
     { headers: GITHUB_HEADERS, muteHttpExceptions: true }
   );
   if (resp.getResponseCode() !== 200)
-    throw new Error('Could not reach song library (HTTP ' + resp.getResponseCode() + ').');
+    throw new Error('Could not reach song library (HTTP ' + resp.getResponseCode() + '). Try again in a minute.');
   const tree = JSON.parse(resp.getContentText()).tree || [];
-  return tree
+  const songs = tree
     .filter(function(f) { return f.type === 'blob' && f.path.endsWith('.onsong'); })
     .map(function(f) {
       return {
@@ -111,6 +115,9 @@ function fetchSongList() {
       };
     })
     .sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+  try { cache.put('songList', JSON.stringify(songs), 21600); } catch(e) {}
+  return songs;
 }
 
 function fetchSong(url) {
@@ -152,14 +159,13 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   const allLines = text.split('\n');
   const citation = (allLines.find(function(l) { return l.trim().startsWith('--'); }) || '').trim();
 
-  // Get verse lines, unwrapping character-wrap newlines for scripture
-  // so Google Slides handles visual line-breaking based on the text box size
-  var verseText = allLines.filter(function(l) { return l.trim() && !l.trim().startsWith('--'); }).join('\n');
-  const verseLines = verseText.split('\n').filter(Boolean);
+  // Get verse lines, preserving blank lines as stanza-break signals.
+  var verseLines = allLines.filter(function(l) { return !l.trim().startsWith('--'); });
 
-  if (verseLines.length === 0) throw new Error('No verse text found.');
+  if (!verseLines.some(function(l) { return l.trim(); })) throw new Error('No verse text found.');
 
   // Group lines into atomic units that must never be split across slides:
+  //   • null  = blank-line stanza break (forces a new slide)
   //   • Scripture: all wrapped lines of one verse stay together (grouped by "N: " prefix)
   //   • Lyrics: a chord line is always paired with its following lyric line
   var verseGroups = [];
@@ -168,7 +174,12 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   while (vi < verseLines.length) {
     var line = verseLines[vi];
     var t = line.trim();
-    if (/^\d+:/.test(t)) {
+    if (!t) {
+      // Blank line — stanza break signal
+      if (curGroup) { verseGroups.push(curGroup); curGroup = null; }
+      verseGroups.push(null);
+      vi++;
+    } else if (/^\d+:/.test(t)) {
       // Start of a new scripture verse
       if (curGroup) verseGroups.push(curGroup);
       curGroup = [line];
@@ -177,7 +188,7 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
       // Continuation line of a scripture verse
       curGroup.push(line);
       vi++;
-    } else if (isChordLine_(t) && vi + 1 < verseLines.length && !isChordLine_(verseLines[vi + 1].trim())) {
+    } else if (isChordLine_(t) && vi + 1 < verseLines.length && verseLines[vi + 1].trim() && !isChordLine_(verseLines[vi + 1].trim())) {
       // Chord line paired with its lyric — keep together
       verseGroups.push([line, verseLines[vi + 1]]);
       vi += 2;
@@ -194,18 +205,44 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
     return lines.filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); }).length;
   }
 
-  // Pack verse groups into slides; never split a verse across slides.
-  const batches = [];
-  var cur = [];
+  // Split verseGroups into sections separated by blank lines or section labels.
+  // Each section gets its own evenly-distributed slide allocation.
+  var sections = [];
+  var curSection = [];
   verseGroups.forEach(function(group) {
-    if (cur.length > 0 && displayCount(cur) + displayCount(group) > linesPerSlide) {
-      batches.push(cur);
-      cur = group.slice();
+    if (group === null) {
+      if (curSection.length > 0) { sections.push(curSection); curSection = []; }
+      return;
+    }
+    var isSection = !isScripture && group.length === 1 && isSectionLabel_(group[0]);
+    if (isSection) {
+      if (curSection.length > 0) sections.push(curSection);
+      curSection = [group]; // section label starts its own section
     } else {
-      cur = cur.concat(group);
+      curSection.push(group);
     }
   });
-  if (cur.length > 0) batches.push(cur);
+  if (curSection.length > 0) sections.push(curSection);
+
+  // Batch each section with even distribution: ceil(total/linesPerSlide) slides,
+  // each holding at most ceil(total/k) lines — so 8 lines / linesPerSlide=6 → 4+4 not 6+2.
+  const batches = [];
+  sections.forEach(function(section) {
+    var total = section.reduce(function(sum, g) { return sum + displayCount(g); }, 0);
+    var k = Math.max(1, Math.ceil(total / linesPerSlide));
+    var target = Math.ceil(total / k);
+
+    var cur = [];
+    section.forEach(function(group) {
+      if (cur.length > 0 && displayCount(cur) + displayCount(group) > target) {
+        batches.push(cur);
+        cur = group.slice();
+      } else {
+        cur = cur.concat(group);
+      }
+    });
+    if (cur.length > 0) batches.push(cur);
+  });
 
   const multiSlide = batches.length > 1;
 
@@ -219,6 +256,10 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   const templateBox = findContentBox_(templateSlide);
   if (!templateBox) throw new Error('No text box found on the template slide.');
 
+  // Save the template font size before any modifications so content slides can restore it.
+  var templateFontSize = null;
+  try { templateFontSize = templateBox.getText().getTextStyle().getFontSize(); } catch(e) {}
+
   // slide.duplicate() places the copy immediately after the source slide,
   // so we chain duplications to keep everything in order.
   let lastSlide = templateSlide;
@@ -228,7 +269,11 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   if (multiSlide && citation) {
     const refSlide = lastSlide.duplicate();
     const box = findContentBox_(refSlide);
-    if (box) box.getText().setText(citation.replace(/^--\s*/, ''));
+    if (box) {
+      const textRange = box.getText();
+      textRange.setText(citation.replace(/^--\s*/, ''));
+      if (templateFontSize) textRange.getTextStyle().setFontSize(templateFontSize * 1.7);
+    }
     lastSlide = refSlide;
     created++;
   }
@@ -239,13 +284,18 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
     const box = findContentBox_(newSlide);
     if (box) {
       if (isScripture) {
-        box.getText().setText(batches[i].join('\n'));
+        const bodyText = batches[i].join('\n');
+        box.getText().setText(bodyText);
+        if (templateFontSize && bodyText) box.getText().getTextStyle().setFontSize(templateFontSize);
       } else {
         // Lyrics: body gets lyric lines only; notes get full chord+lyric text
         const lyricOnly = batches[i]
           .filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); })
           .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, ''); }); // strip any inline [Chord] markers
-        box.getText().setText(lyricOnly.join('\n'));
+        if (lyricOnly.length === 0) { newSlide.remove(); continue; } // skip all-label batches
+        const bodyText = lyricOnly.join('\n');
+        box.getText().setText(bodyText);
+        if (templateFontSize) box.getText().getTextStyle().setFontSize(templateFontSize);
         try {
           newSlide.getNotesPage().getSpeakerNotesShape().getText()
             .setText(chordFormat === 'inline' ? batches[i].join('\n') : convertInlineChordsForNotes_(batches[i]).join('\n'));

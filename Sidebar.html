@@ -163,7 +163,7 @@
       </select>
       <label class="cb-lbl"><input type="checkbox" id="verseNums" checked onchange="reloadFromCache()"> Verse #s</label>
       <label class="cb-lbl" title="Capitalizes he/him/his — works best in passages mainly about God/Jesus">
-        <input type="checkbox" id="divinePronouns" onchange="reloadFromCache()"> He/Him
+        <input type="checkbox" id="divinePronouns" checked onchange="reloadFromCache()"> He/Him
       </label>
     </div>
     <div class="row" id="esvKeyRow">
@@ -202,7 +202,7 @@
     </div>
     <div class="row">
       <span class="lbl">Chord format:</span>
-      <select id="chordFormat">
+      <select id="chordFormat" onchange="updateOutput()">
         <option value="above">Above lyrics</option>
         <option value="inline">Inline [chords]</option>
       </select>
@@ -308,8 +308,11 @@ function wrapPair(chord, lyric, maxLen) {
   while (ly.length > maxLen) {
     var sp = findSplit(ly, maxLen);
     if (sp < 0) break;
-    out.push([ch.slice(0, sp).trimEnd(), ly.slice(0, sp).trimEnd()]);
-    ch = ch.slice(sp + 1);
+    // Snap chord split backward to the nearest space so we never cut inside a chord token
+    var chSp = sp;
+    while (chSp > 0 && ch[chSp] !== ' ') chSp--;
+    out.push([ch.slice(0, chSp).trimEnd(), ly.slice(0, sp).trimEnd()]);
+    ch = ch.slice(chSp + 1);
     ly = ly.slice(sp + 1);
     if (ch.length < ly.length) ch = ch.padEnd(ly.length);
   }
@@ -373,9 +376,10 @@ function wrapTextLines(text, maxLen) {
 }
 function formatScripture(verses, canonical, maxLen, showNums, capitalize) {
   var lines = [];
+  var useNums = showNums && verses.length > 1;
   verses.forEach(function(v) {
     var text = capitalize ? capitalizePronouns(v.text) : v.text;
-    var prefix = showNums ? (v.verse + ': ') : '';
+    var prefix = useNums ? (v.verse + ': ') : '';
     wrapTextLines(prefix + text, maxLen).forEach(function(l) { lines.push(l); });
   });
   lines.push('-- ' + canonical);
@@ -392,10 +396,10 @@ function getMaxLen()   { return Math.max(10, parseInt(document.getElementById('m
 function getUseFlats() { return document.getElementById('accidentals').value === 'flat'; }
 
 function updateOutput() {
-  document.getElementById('output').textContent = process(
-    document.getElementById('input').value,
-    getMaxLen(), transposeSteps, getUseFlats()
-  );
+  var input = document.getElementById('input').value;
+  var fmt = document.getElementById('chordFormat').value;
+  var text = (!outputIsScripture && fmt === 'above') ? parseOnSong(input) : input;
+  document.getElementById('output').textContent = process(text, getMaxLen(), transposeSteps, getUseFlats());
 }
 
 function adjustLinesPerSlide(d) {
@@ -523,13 +527,25 @@ function loadSong(url, name) {
     .withSuccessHandler(function(raw) {
       outputIsScripture = false;
       lastVerses = null;
-      var fmt = document.getElementById('chordFormat').value;
-      document.getElementById('input').value = fmt === 'above' ? parseOnSong(raw) : raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      document.getElementById('input').value = stripOnSongHeader(raw);
       updateOutput();
       setSongStatus('Loaded: ' + name);
     })
     .withFailureHandler(function(e) { setSongStatus(e.message, true); })
     .fetchSong(url);
+}
+
+// Strip everything before the first section header or inline chord line.
+function stripOnSongHeader(raw) {
+  var lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var SECTION    = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp|V\d|C\d|B\d)[\]:\s]/i;
+  var HAS_INLINE = /\[[A-G]/;
+  var CHORD_ABOVE = /^([A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?\s+)+[A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
+  for (var i = 0; i < lines.length; i++) {
+    var t = lines[i].trim();
+    if (SECTION.test(t) || HAS_INLINE.test(t) || CHORD_ABOVE.test(t)) return lines.slice(i).join('\n').trim();
+  }
+  return raw.trim();
 }
 
 // Convert OnSong/ChordPro [Chord]lyric format → chord-line-above-lyric format
@@ -542,6 +558,7 @@ function parseOnSong(raw) {
   // Metadata keys to always skip (even after started)
   var METADATA = /^(Title|Artist|Author|Key|Original Key|Tempo|Time|Capo|Duration|CCLI|Notes|Book|Scripture|Copyright|Themes?|Keywords?):/i;
   var HAS_INLINE = /\[[A-G]/; // has an inline chord marker
+  var CHORD_ABOVE = /^([A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?\s+)+[A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
@@ -551,7 +568,7 @@ function parseOnSong(raw) {
     if (METADATA.test(t)) continue;
 
     if (!started) {
-      if (SECTION.test(t) || HAS_INLINE.test(t)) started = true;
+      if (SECTION.test(t) || HAS_INLINE.test(t) || CHORD_ABOVE.test(t)) started = true;
       else continue;
     }
 
