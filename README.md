@@ -13,7 +13,9 @@ A Google Apps Script sidebar for Google Slides that creates church presentation 
 
 Slides are created by duplicating a template slide you choose, so they automatically inherit your presentation's fonts, colors, and background.
 
-![Presenter view showing lyrics on slide and chords in speaker notes](docs/PresentationView.png)
+| Side panel | Generated slides | Presenter view |
+|:---:|:---:|:---:|
+| ![Side panel](docs/SidePanel.png) | ![Generated slides](docs/Slides.png) | ![Presenter view](docs/PresentationView.png) |
 
 ---
 
