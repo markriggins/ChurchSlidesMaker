@@ -119,12 +119,32 @@
     .status { font-size: 11px; color: #777; font-style: italic; margin-top: 4px; min-height: 14px; }
     .status.err { color: #c00; font-style: normal; font-weight: 500; }
 
+    /* ── Song list ── */
+    .song-item {
+      padding: 4px 7px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .song-item:last-child { border-bottom: none; }
+    .song-item:hover { background: #eef4ff; }
+
     /* ── Create Slides button ── */
     #createBtn { width: 100%; padding: 8px; font-size: 13px; font-weight: 600; margin-top: 2px; }
     #createStatus { margin-top: 5px; }
   </style>
 </head>
 <body>
+
+<!-- ── Song Lookup ───────────────────────────────────── -->
+<div class="section">
+  <div class="section-head collapsed" onclick="toggleSongSection(this)">🎵 Song Lookup</div>
+  <div class="section-body" style="display:none">
+    <input type="text" id="songSearch" placeholder="Search songs…" style="width:100%;margin-bottom:5px"
+           oninput="filterSongs(this.value)">
+    <div id="songList" style="max-height:160px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:3px;font-size:11px"></div>
+    <div class="status" id="songStatus"></div>
+  </div>
+</div>
 
 <!-- ── Scripture ─────────────────────────────────────── -->
 <div class="section">
@@ -178,6 +198,13 @@
       <select id="accidentals" onchange="updateOutput()">
         <option value="sharp">Sharps (#)</option>
         <option value="flat">Flats (♭)</option>
+      </select>
+    </div>
+    <div class="row">
+      <span class="lbl">Chord format:</span>
+      <select id="chordFormat">
+        <option value="above">Above lyrics</option>
+        <option value="inline">Inline [chords]</option>
       </select>
     </div>
   </div>
@@ -444,6 +471,133 @@ function lookupScripture() {
     .fetchScripture(ref, trans, key);
 }
 
+// ─── Song lookup ──────────────────────────────────────────────────────────────
+var songCatalog = null; // [{name, url}]
+
+function toggleSongSection(head) {
+  toggle(head);
+  if (songCatalog === null && head.nextElementSibling.style.display !== 'none') {
+    loadSongCatalog();
+  }
+}
+
+function loadSongCatalog() {
+  setSongStatus('Loading song list…');
+  google.script.run
+    .withSuccessHandler(function(songs) {
+      songCatalog = songs;
+      setSongStatus('');
+      filterSongs(document.getElementById('songSearch').value);
+    })
+    .withFailureHandler(function(e) { setSongStatus(e.message, true); })
+    .fetchSongList();
+}
+
+function setSongStatus(msg, isErr) {
+  var el = document.getElementById('songStatus');
+  el.textContent = msg;
+  el.className = 'status' + (isErr ? ' err' : '');
+}
+
+function filterSongs(q) {
+  var list = document.getElementById('songList');
+  if (!songCatalog) { list.innerHTML = ''; return; }
+  var matches = q.trim()
+    ? songCatalog.filter(function(s) { return s.name.toLowerCase().indexOf(q.toLowerCase()) >= 0; })
+    : songCatalog;
+  list.innerHTML = '';
+  matches.slice(0, 80).forEach(function(s) {
+    var div = document.createElement('div');
+    div.className = 'song-item';
+    div.textContent = s.name;
+    div.dataset.url = s.url;
+    div.dataset.name = s.name;
+    div.addEventListener('click', function() { loadSong(this.dataset.url, this.dataset.name); });
+    list.appendChild(div);
+  });
+}
+
+function loadSong(url, name) {
+  setSongStatus('Loading…');
+  google.script.run
+    .withSuccessHandler(function(raw) {
+      outputIsScripture = false;
+      lastVerses = null;
+      var fmt = document.getElementById('chordFormat').value;
+      document.getElementById('input').value = fmt === 'above' ? parseOnSong(raw) : raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      updateOutput();
+      setSongStatus('Loaded: ' + name);
+    })
+    .withFailureHandler(function(e) { setSongStatus(e.message, true); })
+    .fetchSong(url);
+}
+
+// Convert OnSong/ChordPro [Chord]lyric format → chord-line-above-lyric format
+function parseOnSong(raw) {
+  var lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var out = [];
+  var started = false;
+  // Match section headers in both formats: [Verse 1] or Verse 1: or Chorus:
+  var SECTION = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp|V\d|C\d|B\d)[\]:\s]/i;
+  // Metadata keys to always skip (even after started)
+  var METADATA = /^(Title|Artist|Author|Key|Original Key|Tempo|Time|Capo|Duration|CCLI|Notes|Book|Scripture|Copyright|Themes?|Keywords?):/i;
+  var HAS_INLINE = /\[[A-G]/; // has an inline chord marker
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var t = line.trim();
+
+    // Always skip metadata lines regardless of position
+    if (METADATA.test(t)) continue;
+
+    if (!started) {
+      if (SECTION.test(t) || HAS_INLINE.test(t)) started = true;
+      else continue;
+    }
+
+    if (!t) { out.push(''); continue; }
+
+    if (SECTION.test(t)) {
+      if (out.length && out[out.length - 1] !== '') out.push('');
+      // Normalise to bracketed form for consistency
+      var label = t.replace(/\[|\]|:$/g, '').trim();
+      out.push('[' + label + ']');
+      continue;
+    }
+
+    if (!HAS_INLINE.test(t)) {
+      out.push(t); // plain lyric line or already-above chord line
+      continue;
+    }
+
+    // Build chord line + lyric line from inline [Chord]lyric notation
+    var chords = '';
+    var lyrics = '';
+    var pos = 0;
+    var j = 0;
+    while (j < line.length) {
+      if (line[j] === '[') {
+        var end = line.indexOf(']', j);
+        if (end < 0) { lyrics += line[j]; pos++; j++; continue; }
+        var chord = line.slice(j + 1, end);
+        if (/^[A-G]/.test(chord)) {
+          while (chords.length < pos) chords += ' ';
+          chords += chord;
+        }
+        j = end + 1;
+      } else {
+        lyrics += line[j];
+        pos++;
+        j++;
+      }
+    }
+    if (chords.trim()) out.push(chords.trimEnd());
+    if (lyrics.trim()) out.push(lyrics.trim());
+  }
+
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 // ─── Copy output ──────────────────────────────────────────────────────────────
 function copyOutput() {
   var el = document.getElementById('output');
@@ -476,7 +630,7 @@ function createSlides() {
       setCreateStatus(e.message, true);
       document.getElementById('createBtn').disabled = false;
     })
-    .createVerseSlides(text, outputIsScripture, Math.max(1, parseInt(document.getElementById('linesPerSlide').value) || 3));
+    .createVerseSlides(text, outputIsScripture, Math.max(1, parseInt(document.getElementById('linesPerSlide').value) || 3), document.getElementById('chordFormat').value);
 }
 function setCreateStatus(msg, isErr) {
   var el = document.getElementById('createStatus');

@@ -89,6 +89,36 @@ function parseESVText_(raw) {
   return verses;
 }
 
+// ─── Song library (mattgraham/worship on GitHub) ─────────────────────────────
+
+const GITHUB_HEADERS = { 'User-Agent': 'ChurchSlidesMaker' };
+
+function fetchSongList() {
+  // Use the recursive git tree API — one request for the full file list.
+  const resp = UrlFetchApp.fetch(
+    'https://api.github.com/repos/mattgraham/worship/git/trees/HEAD?recursive=1',
+    { headers: GITHUB_HEADERS, muteHttpExceptions: true }
+  );
+  if (resp.getResponseCode() !== 200)
+    throw new Error('Could not reach song library (HTTP ' + resp.getResponseCode() + ').');
+  const tree = JSON.parse(resp.getContentText()).tree || [];
+  return tree
+    .filter(function(f) { return f.type === 'blob' && f.path.endsWith('.onsong'); })
+    .map(function(f) {
+      return {
+        name: f.path.replace(/\.onsong$/i, ''),
+        url: 'https://raw.githubusercontent.com/mattgraham/worship/master/' + encodeURIComponent(f.path)
+      };
+    })
+    .sort(function(a, b) { return a.name.localeCompare(b.name); });
+}
+
+function fetchSong(url) {
+  const resp = UrlFetchApp.fetch(url, { headers: GITHUB_HEADERS, muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200) throw new Error('Song not found.');
+  return resp.getContentText();
+}
+
 // ─── Slide creation ───────────────────────────────────────────────────────────
 
 // Rejoin character-wrapped lines back into one line per verse.
@@ -111,8 +141,9 @@ function unwrapScripture_(text) {
   return result.join('\n');
 }
 
-function createVerseSlides(text, isScripture, linesPerSlide) {
+function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   linesPerSlide = linesPerSlide || LINES_PER_SLIDE;
+  chordFormat = chordFormat || 'above';
   const pres = SlidesApp.getActivePresentation();
   const idx  = parseInt(PropertiesService.getUserProperties().getProperty('templateSlideIdx') || '0');
   const templateSlide = pres.getSlides()[idx];
@@ -128,27 +159,46 @@ function createVerseSlides(text, isScripture, linesPerSlide) {
 
   if (verseLines.length === 0) throw new Error('No verse text found.');
 
-  // Group wrapped lines back into verse units (a new verse starts with "N: ").
-  // If no verse numbers, each line is its own unit.
+  // Group lines into atomic units that must never be split across slides:
+  //   • Scripture: all wrapped lines of one verse stay together (grouped by "N: " prefix)
+  //   • Lyrics: a chord line is always paired with its following lyric line
   var verseGroups = [];
   var curGroup = null;
-  verseLines.forEach(function(line) {
-    if (/^\d+:/.test(line.trim())) {
+  var vi = 0;
+  while (vi < verseLines.length) {
+    var line = verseLines[vi];
+    var t = line.trim();
+    if (/^\d+:/.test(t)) {
+      // Start of a new scripture verse
       if (curGroup) verseGroups.push(curGroup);
       curGroup = [line];
+      vi++;
     } else if (curGroup) {
+      // Continuation line of a scripture verse
       curGroup.push(line);
+      vi++;
+    } else if (isChordLine_(t) && vi + 1 < verseLines.length && !isChordLine_(verseLines[vi + 1].trim())) {
+      // Chord line paired with its lyric — keep together
+      verseGroups.push([line, verseLines[vi + 1]]);
+      vi += 2;
     } else {
-      verseGroups.push([line]); // no verse numbers — each line standalone
+      // Section label, standalone lyric, or orphan chord at end
+      verseGroups.push([line]);
+      vi++;
     }
-  });
+  }
   if (curGroup) verseGroups.push(curGroup);
+
+  // Count only lines that will appear in the slide text box.
+  function displayCount(lines) {
+    return lines.filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); }).length;
+  }
 
   // Pack verse groups into slides; never split a verse across slides.
   const batches = [];
   var cur = [];
   verseGroups.forEach(function(group) {
-    if (cur.length > 0 && cur.length + group.length > linesPerSlide) {
+    if (cur.length > 0 && displayCount(cur) + displayCount(group) > linesPerSlide) {
       batches.push(cur);
       cur = group.slice();
     } else {
@@ -192,11 +242,13 @@ function createVerseSlides(text, isScripture, linesPerSlide) {
         box.getText().setText(batches[i].join('\n'));
       } else {
         // Lyrics: body gets lyric lines only; notes get full chord+lyric text
-        const lyricOnly = batches[i].filter(function(l) { return !isChordLine_(l); });
+        const lyricOnly = batches[i]
+          .filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); })
+          .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, ''); }); // strip any inline [Chord] markers
         box.getText().setText(lyricOnly.join('\n'));
         try {
           newSlide.getNotesPage().getSpeakerNotesShape().getText()
-            .setText(batches[i].join('\n'));
+            .setText(chordFormat === 'inline' ? batches[i].join('\n') : convertInlineChordsForNotes_(batches[i]).join('\n'));
         } catch(e) { /* notes unavailable */ }
       }
     }
@@ -219,6 +271,34 @@ function getCurrentSlideIndex_() {
     }
   } catch(e) { /* no selection */ }
   return 0;
+}
+
+// Convert any remaining inline [Chord]lyric markers to chord-above format for notes.
+function convertInlineChordsForNotes_(lines) {
+  var out = [];
+  lines.forEach(function(line) {
+    if (line.indexOf('[') < 0 || !/\[[A-G]/.test(line)) { out.push(line); return; }
+    var chords = '', lyrics = '', pos = 0, j = 0;
+    while (j < line.length) {
+      if (line[j] === '[') {
+        var end = line.indexOf(']', j);
+        if (end < 0) { lyrics += line[j]; pos++; j++; return; }
+        var chord = line.slice(j + 1, end);
+        if (/^[A-G]/.test(chord)) {
+          while (chords.length < pos) chords += ' ';
+          chords += chord;
+        }
+        j = end + 1;
+      } else { lyrics += line[j]; pos++; j++; }
+    }
+    if (chords.trim()) out.push(chords.trimRight());
+    if (lyrics.trim()) out.push(lyrics.trim());
+  });
+  return out;
+}
+
+function isSectionLabel_(line) {
+  return /^\[?(Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp)\b/i.test(line.trim());
 }
 
 function isChordLine_(line) {
