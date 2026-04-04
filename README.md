@@ -19,20 +19,6 @@ Slides are created by duplicating a template slide you choose, so they automatic
 
 ---
 
-## Setup
-
-1. Open (or create) a Google Slides presentation you want to use for church slides
-2. Go to **Extensions → Apps Script**
-3. Delete any default code in `Code.gs` and paste in the contents of `Code.gs` from this repo
-4. Click **+** to add a new HTML file, name it exactly `Sidebar`, and paste in the contents of `Sidebar.html`
-5. Add or replace `appsscript.json` with the one from this repo (you may need to enable "Show 'appsscript.json' manifest file in editor" in Project Settings first)
-6. Save all files (**Ctrl+S** / **Cmd+S**), then close the Apps Script editor and **reload the presentation**
-7. A **ChurchSlidesMaker** menu will appear in the menu bar — click **ChurchSlidesMaker → Open ChurchSlidesMaker**
-
-> **Note:** If the menu is hidden, widen your browser window — Google Slides collapses menu items into a `…` overflow when the window is narrow.
-
----
-
 ## Usage
 
 ### Choosing a template slide
@@ -110,6 +96,20 @@ Scripture-specific options (in the Scripture Lookup section):
 |---|---|
 | **Verse #s** | Show verse numbers (e.g. `16: For God so loved…`) |
 | **He/Him** | Capitalize pronouns referring to God/Jesus |
+
+---
+
+## Setup
+
+1. Open (or create) a Google Slides presentation you want to use for church slides
+2. Go to **Extensions → Apps Script**
+3. Delete any default code in `Code.gs` and paste in the contents of `Code.gs` from this repo
+4. Click **+** to add a new HTML file, name it exactly `Sidebar`, and paste in the contents of `Sidebar.html`
+5. Add or replace `appsscript.json` with the one from this repo (you may need to enable "Show 'appsscript.json' manifest file in editor" in Project Settings first)
+6. Save all files (**Ctrl+S** / **Cmd+S**), then close the Apps Script editor and **reload the presentation**
+7. A **ChurchSlidesMaker** menu will appear in the menu bar — click **ChurchSlidesMaker → Open ChurchSlidesMaker**
+
+> **Note:** If the menu is hidden, widen your browser window — Google Slides collapses menu items into a `…` overflow when the window is narrow.
 
 ---
 
