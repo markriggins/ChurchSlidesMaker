@@ -317,25 +317,39 @@ function stripChordParens(line) {
 var CONJ = new Set(['and','but','or','so','yet','for','nor','because','although',
                     'while','when','if','as','since','though','until','unless','where']);
 var PREP = new Set(['in','on','at','to','from','with','by','of','about','through',
-                    'into','over','under','before','after','between','among','upon','across']);
+                    'into','over','under','before','after','between','among','upon','across','like']);
 
 function findSplit(lyric, maxLen) {
   if (lyric.length <= maxLen) return -1;
-  var punct = -1, conj = -1, prep = -1, space = -1;
   var min = Math.max(5, Math.floor(maxLen * 0.35));
-  for (var i = Math.min(maxLen, lyric.length - 1); i >= min; i--) {
+  var minSecond = Math.max(6, Math.floor(maxLen * 0.35));
+  var mid = Math.floor(lyric.length / 2);  // target: equal halves
+  var best = -1, bestScore = -1e9;
+  for (var i = min; i <= Math.min(maxLen, lyric.length - 1); i++) {
     if (lyric[i] !== ' ') continue;
-    if (space < 0) space = i;
-    if (punct < 0 && i > 0 && /[,;:]/.test(lyric[i - 1])) punct = i;
-    var word = (lyric.slice(i + 1).match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
-    if (conj < 0 && CONJ.has(word)) conj = i;
-    if (prep < 0 && PREP.has(word)) prep = i;
+    if (lyric.length - i - 1 < minSecond) continue;
+    var quality;
+    if (i > 0 && /[,;:]/.test(lyric[i - 1])) {
+      quality = 3;
+    } else {
+      var word = (lyric.slice(i + 1).match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
+      if (CONJ.has(word)) quality = 2;
+      else if (PREP.has(word)) quality = 1;
+      else quality = 0;
+    }
+    // Among same-quality candidates, prefer the split closest to the midpoint
+    var score = quality * 1000 - Math.abs(i - mid);
+    if (score > bestScore) { bestScore = score; best = i; }
   }
-  if (punct < 0 && conj < 0 && prep < 0 && space < 0) {
-    for (var j = maxLen + 1; j < lyric.length; j++) if (lyric[j] === ' ') return j;
-    return -1;
+  if (best >= 0) return best;
+  // Fallback: no split met minSecond — use space closest to midpoint regardless
+  var fbBest = -1, fbDist = 1e9;
+  for (var i2 = min; i2 <= Math.min(maxLen, lyric.length - 1); i2++) {
+    if (lyric[i2] === ' ') { var d = Math.abs(i2 - mid); if (d < fbDist) { fbDist = d; fbBest = i2; } }
   }
-  return punct >= 0 ? punct : conj >= 0 ? conj : prep >= 0 ? prep : space;
+  if (fbBest >= 0) return fbBest;
+  for (var j = maxLen + 1; j < lyric.length; j++) if (lyric[j] === ' ') return j;
+  return -1;
 }
 
 // ─── Wrap chord+lyric pair ────────────────────────────────────────────────────
@@ -370,18 +384,20 @@ function process(input, maxLen, transposeSteps, useFlats) {
       var chordLine = stripChordParens(transposeChordLine(line, transposeSteps, useFlats));
       var nextLine = (i + 1 < lines.length) ? lines[i + 1] : '';
       if (nextLine && !isChordLine(nextLine) && nextLine.trim()) {
-        wrapPair(chordLine, nextLine, maxLen).forEach(function(p) {
-          if (p[0]) out.push(p[0]);
-          out.push(p[1]);
+        wrapPair(chordLine, nextLine, maxLen).forEach(function(p, idx) {
+          var pfx = idx > 0 ? '​' : '';
+          if (p[0]) out.push(pfx + p[0]);
+          out.push(pfx + p[1]);
         });
         i += 2;
       } else {
         out.push(chordLine); i++;
       }
     } else {
-      wrapPair('', line, maxLen).forEach(function(p) {
-        if (p[0]) out.push(p[0]);
-        out.push(p[1]);
+      wrapPair('', line, maxLen).forEach(function(p, idx) {
+        var pfx = idx > 0 ? '​' : '';
+        if (p[0]) out.push(pfx + p[0]);
+        out.push(pfx + p[1]);
       });
       i++;
     }
@@ -840,17 +856,20 @@ function parseOnSong(raw) {
 
 // ─── Copy output ──────────────────────────────────────────────────────────────
 function copyOutput() {
-  var el = document.getElementById('output');
-  var range = document.createRange();
-  range.selectNodeContents(el);
-  var sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  document.execCommand('copy');
-  sel.removeAllRanges();
+  var text = document.getElementById('output').textContent.replace(/​/g, '');
   var hint = document.getElementById('copyHint');
-  hint.textContent = 'Copied!';
-  setTimeout(function() { hint.textContent = ''; }, 2000);
+  function done() { hint.textContent = 'Copied!'; setTimeout(function() { hint.textContent = ''; }, 2000); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    done();
+  }
 }
 
 // ─── Create Slides ────────────────────────────────────────────────────────────

@@ -255,37 +255,51 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   //   • null  = blank-line stanza break (forces a new slide)
   //   • Scripture: verse-number line is its own group; each continuation line is also
   //     its own group so the batcher can split long verses across slides
-  //   • Lyrics: a chord line is always paired with its following lyric line
+  //   • Lyrics: a chord line is always paired with its following lyric line;
+  //     wrapped continuations (U+200B prefix from client) stay with their originating group
   var verseGroups = [];
   var curGroup = null;
   var vi = 0;
   while (vi < verseLines.length) {
     var line = verseLines[vi];
-    var t = line.trim();
+    var isCont = line.charCodeAt(0) === 0x200B;
+    var cleanLine = isCont ? line.slice(1) : line;
+    var t = cleanLine.trim();
     if (!t) {
       // Blank line — stanza break signal
       if (curGroup) { verseGroups.push(curGroup); curGroup = null; }
       verseGroups.push(null);
       vi++;
+    } else if (!isScripture && isCont && verseGroups.length > 0 && verseGroups[verseGroups.length - 1] !== null) {
+      // Wrapped-line continuation — keep with the previous lyric group
+      verseGroups[verseGroups.length - 1].push(cleanLine);
+      vi++;
     } else if (/^\d+:/.test(t)) {
       // Start of a new scripture verse
       if (curGroup) verseGroups.push(curGroup);
-      curGroup = [line];
+      curGroup = [cleanLine];
       vi++;
     } else if (curGroup) {
       // Continuation line of a scripture verse — flush the verse-number group,
       // then treat this line as its own group so the batcher can split long verses
       verseGroups.push(curGroup);
       curGroup = null;
-      verseGroups.push([line]);
+      verseGroups.push([cleanLine]);
       vi++;
-    } else if (isChordLine_(t) && vi + 1 < verseLines.length && verseLines[vi + 1].trim() && !isChordLine_(verseLines[vi + 1].trim())) {
-      // Chord line paired with its lyric — keep together
-      verseGroups.push([line, verseLines[vi + 1]]);
-      vi += 2;
+    } else if (isChordLine_(t) && vi + 1 < verseLines.length) {
+      var nextRaw = verseLines[vi + 1];
+      var nextClean = nextRaw.charCodeAt(0) === 0x200B ? nextRaw.slice(1) : nextRaw;
+      if (nextClean.trim() && !isChordLine_(nextClean.trim())) {
+        // Chord line paired with its lyric — keep together
+        verseGroups.push([cleanLine, nextClean]);
+        vi += 2;
+      } else {
+        verseGroups.push([cleanLine]);
+        vi++;
+      }
     } else {
       // Section label, standalone lyric, or orphan chord at end
-      verseGroups.push([line]);
+      verseGroups.push([cleanLine]);
       vi++;
     }
   }
