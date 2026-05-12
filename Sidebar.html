@@ -139,6 +139,19 @@
 <div class="section">
   <div class="section-head collapsed" onclick="toggleSongSection(this)">🎵 Song Lookup</div>
   <div class="section-body" style="display:none">
+    <select id="songSource" onchange="onSongSourceChange()" style="width:100%;margin-bottom:4px">
+      <option value="github:mattgraham/worship">GitHub: mattgraham/worship</option>
+      <option value="drive">Google Drive: EasternGate/Songs</option>
+      <option value="github:custom">GitHub: custom…</option>
+    </select>
+    <input type="text" id="customSongRepo" placeholder="owner/repo or GitHub URL"
+           style="width:100%;margin-bottom:4px;display:none"
+           onchange="onCustomRepoEnter()">
+    <div class="row">
+      <span class="lbl">GitHub token:</span>
+      <input type="password" id="githubToken" placeholder="optional — raises rate limit"
+             style="flex:1;min-width:0" oninput="saveGithubToken()">
+    </div>
     <input type="text" id="songSearch" placeholder="Search songs…" style="width:100%;margin-bottom:5px"
            oninput="filterSongs(this.value)">
     <div id="songList" style="max-height:160px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:3px;font-size:11px"></div>
@@ -207,6 +220,17 @@
         <option value="inline">Inline [chords]</option>
       </select>
     </div>
+    <div class="row">
+      <span class="lbl">Transpose notes:</span>
+      <span class="lbl">slides</span>
+      <input type="number" id="transFrom" min="1" style="width:46px" value="1">
+      <span class="lbl">–</span>
+      <input type="number" id="transTo" min="1" style="width:46px" value="">
+      <button class="btn btn-blue" onclick="transposeSelectedNotes()" title="Shift all chords in the speaker notes of the selected slides up or down by the Transpose amount">Transpose Existing Slides</button>
+      <button class="btn btn-blue" onclick="normalizeSlides()" title="Copy the font, text color, and drop shadow from the first selected slide to all other text-box slides in the range. Also removes empty text boxes.">Normalize</button>
+      <button class="btn btn-blue" id="convertWordArtBtn" onclick="convertWordArt()" style="display:none" title="Replace Word Art elements in the selected slides with text boxes, using the style of the first slide (or Comic Sans MS with a black drop shadow if the first slide has no text box).">Convert Word Art</button>
+    </div>
+    <div class="status" id="transposeStatus"></div>
   </div>
 </div>
 
@@ -254,14 +278,20 @@ function transposeNote(note, steps, useFlats) {
 }
 function transposeChordToken(token, steps, useFlats) {
   if (steps === 0) return token;
+  // Strip outer parens: (G) → G, (Am/D) → Am/D; re-add after transposing
+  var outer = token.length > 2 && token[0] === '(' && token[token.length - 1] === ')';
+  if (outer) token = token.slice(1, -1);
   var slash = token.indexOf('/', 1);
+  var result;
   if (slash > 0) {
-    return transposeChordToken(token.slice(0, slash), steps, useFlats) +
-           '/' + transposeChordToken(token.slice(slash + 1), steps, useFlats);
+    result = transposeChordToken(token.slice(0, slash), steps, useFlats) +
+             '/' + transposeChordToken(token.slice(slash + 1), steps, useFlats);
+  } else {
+    var hasAcc = token.length > 1 && (token[1] === '#' || token[1] === 'b');
+    var root = hasAcc ? token.slice(0, 2) : token[0];
+    result = transposeNote(root, steps, useFlats) + token.slice(root.length);
   }
-  var hasAcc = token.length > 1 && (token[1] === '#' || token[1] === 'b');
-  var root = hasAcc ? token.slice(0, 2) : token[0];
-  return transposeNote(root, steps, useFlats) + token.slice(root.length);
+  return outer ? '(' + result + ')' : result;
 }
 function transposeChordLine(line, steps, useFlats) {
   if (steps === 0) return line;
@@ -269,10 +299,18 @@ function transposeChordLine(line, steps, useFlats) {
 }
 
 // ─── Chord detection ──────────────────────────────────────────────────────────
-var CHORD_PAT = /^[A-G][#b]?(m(aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
+// Matches a bare chord token (Am, G/D, Gsus4) or parenthesized token ((Am), (G/D))
+var CHORD_PAT = /^[A-G][#b]?(m(?:aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(?:\([^)]*\))?(?:\/[A-G][#b]?)?$/;
+function isChordToken(w) {
+  if (w.length > 2 && w[0] === '(' && w[w.length - 1] === ')') w = w.slice(1, -1);
+  return CHORD_PAT.test(w);
+}
 function isChordLine(line) {
   var words = line.trim().split(/\s+/).filter(Boolean);
-  return words.length > 0 && words.every(function(w) { return CHORD_PAT.test(w); });
+  return words.length > 0 && words.every(isChordToken);
+}
+function stripChordParens(line) {
+  return line.replace(/\([A-G][^\s)]*\)/g, function(m) { return m.slice(1, -1); });
 }
 
 // ─── Split point ──────────────────────────────────────────────────────────────
@@ -329,7 +367,7 @@ function process(input, maxLen, transposeSteps, useFlats) {
     var line = lines[i];
     if (!line.trim()) { out.push(''); i++; continue; }
     if (isChordLine(line)) {
-      var chordLine = transposeChordLine(line, transposeSteps, useFlats);
+      var chordLine = stripChordParens(transposeChordLine(line, transposeSteps, useFlats));
       var nextLine = (i + 1 < lines.length) ? lines[i + 1] : '';
       if (nextLine && !isChordLine(nextLine) && nextLine.trim()) {
         wrapPair(chordLine, nextLine, maxLen).forEach(function(p) {
@@ -392,6 +430,45 @@ var lastVerses      = null;
 var lastCanonical   = '';
 var outputIsScripture = false;
 
+// Restore saved custom GitHub repos into the source dropdown.
+(function loadSavedRepos() {
+  var saved = JSON.parse(localStorage.getItem('savedSongRepos') || '[]');
+  var select = document.getElementById('songSource');
+  var anchor = select.querySelector('option[value="github:custom"]');
+  saved.forEach(function(repo) {
+    var val = 'github:' + repo;
+    if (select.querySelector('option[value="' + CSS.escape(val) + '"]')) return;
+    var opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = 'GitHub: ' + repo;
+    select.insertBefore(opt, anchor);
+  });
+})();
+
+// Initialize slide range to cover all slides
+google.script.run
+  .withSuccessHandler(function(n) {
+    document.getElementById('transTo').value = n;
+  })
+  .getSlideCount();
+
+// Poll for slide selection every 2 seconds and update the range fields
+var selectionPollBusy = false;
+setInterval(function() {
+  if (selectionPollBusy) return;
+  selectionPollBusy = true;
+  google.script.run
+    .withSuccessHandler(function(range) {
+      selectionPollBusy = false;
+      if (!range) return;
+      document.getElementById('transFrom').value = range.from;
+      document.getElementById('transTo').value   = range.to;
+      document.getElementById('convertWordArtBtn').style.display = range.hasWordArt ? '' : 'none';
+    })
+    .withFailureHandler(function() { selectionPollBusy = false; })
+    .getSelectedSlideRange();
+}, 2000);
+
 function getMaxLen()   { return Math.max(10, parseInt(document.getElementById('maxLen').value) || 30); }
 function getUseFlats() { return document.getElementById('accidentals').value === 'flat'; }
 
@@ -400,6 +477,62 @@ function updateOutput() {
   var fmt = document.getElementById('chordFormat').value;
   var text = (!outputIsScripture && fmt === 'above') ? parseOnSong(input) : input;
   document.getElementById('output').textContent = process(text, getMaxLen(), transposeSteps, getUseFlats());
+}
+
+function transposeSelectedNotes() {
+  if (transposeSteps === 0) {
+    document.getElementById('transposeStatus').textContent = 'Set a transpose amount first.';
+    return;
+  }
+  var from = parseInt(document.getElementById('transFrom').value) || 1;
+  var to   = parseInt(document.getElementById('transTo').value)   || null;
+  var status = document.getElementById('transposeStatus');
+  status.className = 'status';
+  status.textContent = 'Transposing…';
+  google.script.run
+    .withSuccessHandler(function(n) {
+      status.textContent = 'Transposed ' + n + ' slide(s).';
+    })
+    .withFailureHandler(function(e) {
+      status.className = 'status err';
+      status.textContent = e.message;
+    })
+    .transposeSelectedNotes(transposeSteps, getUseFlats(), from, to);
+}
+
+function convertWordArt() {
+  var from   = parseInt(document.getElementById('transFrom').value) || 1;
+  var to     = parseInt(document.getElementById('transTo').value)   || null;
+  var status = document.getElementById('transposeStatus');
+  status.className = 'status';
+  status.textContent = 'Converting Word Art…';
+  google.script.run
+    .withSuccessHandler(function(n) {
+      status.textContent = 'Converted ' + n + ' Word Art element(s).';
+      document.getElementById('convertWordArtBtn').style.display = 'none';
+    })
+    .withFailureHandler(function(e) {
+      status.className = 'status err';
+      status.textContent = e.message;
+    })
+    .convertWordArt(from, to);
+}
+
+function normalizeSlides() {
+  var from   = parseInt(document.getElementById('transFrom').value) || 1;
+  var to     = parseInt(document.getElementById('transTo').value)   || null;
+  var status = document.getElementById('transposeStatus');
+  status.className = 'status';
+  status.textContent = 'Normalizing…';
+  google.script.run
+    .withSuccessHandler(function(n) {
+      status.textContent = 'Normalized ' + n + ' slide(s).';
+    })
+    .withFailureHandler(function(e) {
+      status.className = 'status err';
+      status.textContent = e.message;
+    })
+    .normalizeSlides(from, to);
 }
 
 function adjustLinesPerSlide(d) {
@@ -417,6 +550,17 @@ function adjustTrans(d) {
   el.textContent = transposeSteps >= 0 ? '+' + transposeSteps : transposeSteps;
   updateOutput();
 }
+
+// ─── GitHub token ─────────────────────────────────────────────────────────────
+(function() {
+  var t = localStorage.getItem('githubToken') || '';
+  if (t) document.getElementById('githubToken').value = t;
+})();
+function saveGithubToken() {
+  localStorage.setItem('githubToken', document.getElementById('githubToken').value.trim());
+  songCatalog = null; // force re-fetch with new token
+}
+function getGithubToken() { return document.getElementById('githubToken').value.trim(); }
 
 // ─── Scripture lookup ─────────────────────────────────────────────────────────
 var savedKey = localStorage.getItem('esvApiKey') || '';
@@ -485,16 +629,67 @@ function toggleSongSection(head) {
   }
 }
 
+function getSongSource() {
+  var src = document.getElementById('songSource').value;
+  if (src === 'github:custom') {
+    var val = document.getElementById('customSongRepo').value.trim();
+    return val ? 'github:' + val : null;
+  }
+  return src;
+}
+
+function onSongSourceChange() {
+  var src = document.getElementById('songSource').value;
+  document.getElementById('customSongRepo').style.display = src === 'github:custom' ? '' : 'none';
+  if (src !== 'github:custom') { songCatalog = null; loadSongCatalog(); }
+}
+
+function onCustomRepoEnter() {
+  var el = document.getElementById('customSongRepo');
+  var val = el.value.trim();
+  if (!val) return;
+  // Translate full GitHub URLs to owner/repo[/tree/branch/subdir]
+  var m = val.match(/^(?:https?:\/\/)?github\.com\/(.+)/);
+  if (m) { val = m[1].replace(/\/+$/, ''); el.value = val; }
+  songCatalog = null;
+  loadSongCatalog();
+}
+
 function loadSongCatalog() {
+  var source = getSongSource();
+  if (!source) return;
+  var isCustomEntry = document.getElementById('songSource').value === 'github:custom';
+  var repoPath = source.replace(/^github:/, '');
   setSongStatus('Loading song list…');
-  google.script.run
+  var runner = google.script.run
     .withSuccessHandler(function(songs) {
       songCatalog = songs;
       setSongStatus('');
+      if (isCustomEntry && repoPath) saveCustomRepo(repoPath);
       filterSongs(document.getElementById('songSearch').value);
     })
-    .withFailureHandler(function(e) { setSongStatus(e.message, true); })
-    .fetchSongList();
+    .withFailureHandler(function(e) { setSongStatus(e.message, true); });
+  if (source === 'drive') {
+    runner.getDriveSongsList();
+  } else {
+    runner.fetchSongList(repoPath, getGithubToken());
+  }
+}
+
+function saveCustomRepo(repo) {
+  var saved = JSON.parse(localStorage.getItem('savedSongRepos') || '[]');
+  if (saved.indexOf(repo) >= 0) return;
+  saved.push(repo);
+  localStorage.setItem('savedSongRepos', JSON.stringify(saved));
+  // Add to dropdown and select it
+  var select = document.getElementById('songSource');
+  var anchor = select.querySelector('option[value="github:custom"]');
+  var opt = document.createElement('option');
+  opt.value = 'github:' + repo;
+  opt.textContent = 'GitHub: ' + repo;
+  select.insertBefore(opt, anchor);
+  select.value = 'github:' + repo;
+  document.getElementById('customSongRepo').style.display = 'none';
 }
 
 function setSongStatus(msg, isErr) {
@@ -522,6 +717,17 @@ function filterSongs(q) {
 }
 
 function loadSong(url, name) {
+  if (url.indexOf('drive://') === 0) {
+    // Drive presentation: append its slides directly into the active presentation.
+    setSongStatus('Inserting slides…');
+    google.script.run
+      .withSuccessHandler(function(n) {
+        setSongStatus('Inserted ' + n + ' slide(s) from "' + name + '".');
+      })
+      .withFailureHandler(function(e) { setSongStatus(e.message, true); })
+      .insertDriveSlides(url.slice('drive://'.length));
+    return;
+  }
   setSongStatus('Loading…');
   google.script.run
     .withSuccessHandler(function(raw) {
@@ -538,12 +744,12 @@ function loadSong(url, name) {
 // Strip everything before the first section header or inline chord line.
 function stripOnSongHeader(raw) {
   var lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  var SECTION    = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp|V\d|C\d|B\d)[\]:\s]/i;
+  var SECTION    = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp)[\]:\s]|^\[(?:V|C|B)\d+\]\s*$/i;
   var HAS_INLINE = /\[[A-G]/;
-  var CHORD_ABOVE = /^([A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?\s+)+[A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
+  var CHORDPRO_SECT = /^\{(?:comment:|soc\b|sov\b|sob\b|start_of_)/i;
   for (var i = 0; i < lines.length; i++) {
     var t = lines[i].trim();
-    if (SECTION.test(t) || HAS_INLINE.test(t) || CHORD_ABOVE.test(t)) return lines.slice(i).join('\n').trim();
+    if (SECTION.test(t) || HAS_INLINE.test(t) || isChordLine(t) || CHORDPRO_SECT.test(t)) return lines.slice(i).join('\n').trim();
   }
   return raw.trim();
 }
@@ -554,11 +760,10 @@ function parseOnSong(raw) {
   var out = [];
   var started = false;
   // Match section headers in both formats: [Verse 1] or Verse 1: or Chorus:
-  var SECTION = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp|V\d|C\d|B\d)[\]:\s]/i;
+  var SECTION = /^(\[)?(?:Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp)[\]:\s]|^\[(?:V|C|B)\d+\]\s*$/i;
   // Metadata keys to always skip (even after started)
   var METADATA = /^(Title|Artist|Author|Key|Original Key|Tempo|Time|Capo|Duration|CCLI|Notes|Book|Scripture|Copyright|Themes?|Keywords?):/i;
   var HAS_INLINE = /\[[A-G]/; // has an inline chord marker
-  var CHORD_ABOVE = /^([A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?\s+)+[A-G][#b]?(m(aj)?7?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
@@ -567,8 +772,26 @@ function parseOnSong(raw) {
     // Always skip metadata lines regardless of position
     if (METADATA.test(t)) continue;
 
+    // Handle ChordPro {directive} lines
+    if (/^\{/.test(t)) {
+      var cpLabel = null;
+      var cpComment = t.match(/^\{comment:\s*([^}]+)/i);
+      if (cpComment) {
+        var cl = cpComment[1].trim();
+        if (/^(Verse|Chorus|Bridge|Pre-?Chorus|Intro|Outro|Tag|Interlude|Vamp)\b/i.test(cl)) cpLabel = cl;
+      } else if (/^\{s[o]c\b|^\{start_of_chorus\b/i.test(t)) { cpLabel = 'Chorus'; }
+        else if (/^\{sov\b|^\{start_of_verse\b/i.test(t))    { cpLabel = 'Verse';  }
+        else if (/^\{sob\b|^\{start_of_bridge\b/i.test(t))   { cpLabel = 'Bridge'; }
+      if (cpLabel) {
+        started = true;
+        if (out.length && out[out.length - 1] !== '') out.push('');
+        out.push('[' + cpLabel + ']');
+      }
+      continue; // skip all {directive} lines
+    }
+
     if (!started) {
-      if (SECTION.test(t) || HAS_INLINE.test(t) || CHORD_ABOVE.test(t)) started = true;
+      if (SECTION.test(t) || HAS_INLINE.test(t) || isChordLine(t)) started = true;
       else continue;
     }
 

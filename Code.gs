@@ -89,35 +89,111 @@ function parseESVText_(raw) {
   return verses;
 }
 
-// ─── Song library (mattgraham/worship on GitHub) ─────────────────────────────
+// ─── Song library ─────────────────────────────────────────────────────────────
 
 const GITHUB_HEADERS = { 'User-Agent': 'ChurchSlidesMaker' };
 
-function fetchSongList() {
-  // Cache the list for 6 hours to avoid GitHub API rate limits (60 req/hr unauthenticated).
+// repoPath = "owner/repo" or "owner/repo/tree/branch/subdir" or a full GitHub URL
+function fetchSongList(repoPath, githubToken) {
+  repoPath = repoPath || 'mattgraham/worship';
+
+  // Normalise full GitHub URLs → owner/repo[/tree/branch/subdir]
+  var urlMatch = repoPath.match(/^(?:https?:\/\/)?github\.com\/(.+)/);
+  if (urlMatch) repoPath = urlMatch[1].replace(/\/+$/, '');
+
+  var parts = repoPath.split('/');
+  if (parts.length < 2) throw new Error('Invalid repo: use owner/repo format.');
+  var owner = parts[0], repo = parts[1];
+
+  // Extract optional subdir, stripping /tree/<branch>/ if present
+  var rest = parts.slice(2);
+  if (rest[0] === 'tree' && rest.length > 1) rest = rest.slice(2);
+  var subdir = rest.join('/');  // '' if none
+
   const cache = CacheService.getScriptCache();
-  const cached = cache.get('songList');
+  const cacheKey = 'songList_' + owner + '_' + repo + (subdir ? '_' + subdir.replace(/\//g, '_') : '');
+  const cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
+  var ghHeaders = Object.assign({}, GITHUB_HEADERS);
+  if (githubToken) ghHeaders['Authorization'] = 'token ' + githubToken;
+
+  // Get default branch so raw URLs work for repos that use "main" instead of "master".
+  var branch = 'master';
+  try {
+    const meta = UrlFetchApp.fetch('https://api.github.com/repos/' + owner + '/' + repo,
+      { headers: ghHeaders, muteHttpExceptions: true });
+    if (meta.getResponseCode() === 200)
+      branch = JSON.parse(meta.getContentText()).default_branch || 'master';
+  } catch(e) {}
+
   const resp = UrlFetchApp.fetch(
-    'https://api.github.com/repos/mattgraham/worship/git/trees/HEAD?recursive=1',
-    { headers: GITHUB_HEADERS, muteHttpExceptions: true }
+    'https://api.github.com/repos/' + owner + '/' + repo + '/git/trees/HEAD?recursive=1',
+    { headers: ghHeaders, muteHttpExceptions: true }
   );
-  if (resp.getResponseCode() !== 200)
+  if (resp.getResponseCode() !== 200) {
+    var errBody = {}; try { errBody = JSON.parse(resp.getContentText()); } catch(e) {}
+    if (resp.getResponseCode() === 403)
+      throw new Error('GitHub rate limit or access error (403). Wait a minute and try again, or check that the repo is public. (' + (errBody.message || '') + ')');
+    if (resp.getResponseCode() === 404)
+      throw new Error('Repo not found (404): check the owner/repo name.');
     throw new Error('Could not reach song library (HTTP ' + resp.getResponseCode() + '). Try again in a minute.');
+  }
   const tree = JSON.parse(resp.getContentText()).tree || [];
   const songs = tree
-    .filter(function(f) { return f.type === 'blob' && f.path.endsWith('.onsong'); })
+    .filter(function(f) {
+      if (f.type !== 'blob' || !/\.(onsong|cho)$/i.test(f.path)) return false;
+      return !subdir || f.path.startsWith(subdir + '/');
+    })
     .map(function(f) {
+      // Encode each path segment separately so slashes (subdirectory separators) survive.
+      const encodedPath = f.path.split('/').map(encodeURIComponent).join('/');
+      var displayPath = subdir ? f.path.slice(subdir.length + 1) : f.path;
       return {
-        name: f.path.replace(/\.onsong$/i, ''),
-        url: 'https://raw.githubusercontent.com/mattgraham/worship/master/' + encodeURIComponent(f.path)
+        name: displayPath.replace(/\.(onsong|cho)$/i, ''),
+        url: 'https://raw.githubusercontent.com/' + owner + '/' + repo + '/' + branch + '/' + encodedPath
       };
     })
     .sort(function(a, b) { return a.name.localeCompare(b.name); });
 
-  try { cache.put('songList', JSON.stringify(songs), 21600); } catch(e) {}
+  try { cache.put(cacheKey, JSON.stringify(songs), 21600); } catch(e) {}
   return songs;
+}
+
+// Lists Google Slides files in the user's Drive at EasternGate/Songs.
+// Returns [{name, url}] where url = "drive://<fileId>".
+function getDriveSongsList() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('driveSongsList');
+  if (cached) return JSON.parse(cached);
+
+  var folder = null;
+  var tops = DriveApp.getFoldersByName('EasternGate');
+  while (tops.hasNext()) {
+    var subs = tops.next().getFoldersByName('Songs');
+    if (subs.hasNext()) { folder = subs.next(); break; }
+  }
+  if (!folder) throw new Error('Could not find EasternGate/Songs folder in Google Drive.');
+
+  var songs = [];
+  var files = folder.getFilesByType(MimeType.GOOGLE_SLIDES);
+  while (files.hasNext()) {
+    var f = files.next();
+    songs.push({ name: f.getName(), url: 'drive://' + f.getId() });
+  }
+  songs.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+  try { cache.put('driveSongsList', JSON.stringify(songs), 3600); } catch(e) {}
+  return songs;
+}
+
+// Appends all slides from a Drive presentation into the active presentation.
+function insertDriveSlides(fileId) {
+  var src  = SlidesApp.openById(fileId);
+  var dest = SlidesApp.getActivePresentation();
+  var count = 0;
+  src.getSlides().forEach(function(slide) { dest.appendSlide(slide); count++; });
+  return count;
 }
 
 function fetchSong(url) {
@@ -152,9 +228,20 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   linesPerSlide = linesPerSlide || LINES_PER_SLIDE;
   chordFormat = chordFormat || 'above';
   const pres = SlidesApp.getActivePresentation();
-  const idx  = parseInt(PropertiesService.getUserProperties().getProperty('templateSlideIdx') || '0');
-  const templateSlide = pres.getSlides()[idx];
-  if (!templateSlide) throw new Error('Template slide not found. Close and reopen the panel from your template slide.');
+  // Prefer section-marker slides in the presentation over the legacy template-slide index.
+  var templateSlide, useMarkerInsert = false, insertionIdx, legacyLastSlide;
+  var marker  = isScripture ? '<<scriptures>>' : '<<songs section>>';
+  var section = findSectionMarker_(pres, marker);
+  if (section) {
+    templateSlide    = section.slide;
+    insertionIdx     = findSectionEnd_(pres, section.index);
+    useMarkerInsert  = true;
+  } else {
+    const idx = parseInt(PropertiesService.getUserProperties().getProperty('templateSlideIdx') || '0');
+    templateSlide = pres.getSlides()[idx];
+    if (!templateSlide) throw new Error('Template slide not found. Add <<songs section>> or <<scriptures>> to a slide\'s speaker notes, or reopen the panel from your template slide.');
+    legacyLastSlide = templateSlide;
+  }
 
   const allLines = text.split('\n');
   const citation = (allLines.find(function(l) { return l.trim().startsWith('--'); }) || '').trim();
@@ -166,7 +253,8 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
 
   // Group lines into atomic units that must never be split across slides:
   //   • null  = blank-line stanza break (forces a new slide)
-  //   • Scripture: all wrapped lines of one verse stay together (grouped by "N: " prefix)
+  //   • Scripture: verse-number line is its own group; each continuation line is also
+  //     its own group so the batcher can split long verses across slides
   //   • Lyrics: a chord line is always paired with its following lyric line
   var verseGroups = [];
   var curGroup = null;
@@ -185,8 +273,11 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
       curGroup = [line];
       vi++;
     } else if (curGroup) {
-      // Continuation line of a scripture verse
-      curGroup.push(line);
+      // Continuation line of a scripture verse — flush the verse-number group,
+      // then treat this line as its own group so the batcher can split long verses
+      verseGroups.push(curGroup);
+      curGroup = null;
+      verseGroups.push([line]);
       vi++;
     } else if (isChordLine_(t) && vi + 1 < verseLines.length && verseLines[vi + 1].trim() && !isChordLine_(verseLines[vi + 1].trim())) {
       // Chord line paired with its lyric — keep together
@@ -260,56 +351,459 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   var templateFontSize = null;
   try { templateFontSize = templateBox.getText().getTextStyle().getFontSize(); } catch(e) {}
 
-  // slide.duplicate() places the copy immediately after the source slide,
-  // so we chain duplications to keep everything in order.
-  let lastSlide = templateSlide;
-  let created   = 0;
+  // Helper: create the next content slide from the template.
+  function nextSlide_() {
+    if (useMarkerInsert) {
+      pres.insertSlide(insertionIdx, templateSlide);
+      var s = pres.getSlides()[insertionIdx];
+      insertionIdx++;
+      return s;
+    } else {
+      var s = legacyLastSlide.duplicate();
+      legacyLastSlide = s;
+      return s;
+    }
+  }
 
-  // Multi-slide: reference-only slide first
+  let created = 0;
+
+  // Multi-slide: reference-only citation slide first
   if (multiSlide && citation) {
-    const refSlide = lastSlide.duplicate();
+    const refSlide = nextSlide_();
     const box = findContentBox_(refSlide);
     if (box) {
       const textRange = box.getText();
       textRange.setText(citation.replace(/^--\s*/, ''));
       if (templateFontSize) textRange.getTextStyle().setFontSize(templateFontSize * 1.7);
     }
-    lastSlide = refSlide;
+    clearSectionMarkers_(refSlide);
     created++;
   }
 
   // Content slides
   for (let i = 0; i < batches.length; i++) {
-    const newSlide = lastSlide.duplicate();
+    const newSlide = nextSlide_();
     const box = findContentBox_(newSlide);
     if (box) {
       if (isScripture) {
         const bodyText = batches[i].join('\n');
         box.getText().setText(bodyText);
         if (templateFontSize && bodyText) box.getText().getTextStyle().setFontSize(templateFontSize);
+        clearSectionMarkers_(newSlide);
       } else {
         // Lyrics: body gets lyric lines only; notes get full chord+lyric text
         const lyricOnly = batches[i]
           .filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); })
-          .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, ''); }); // strip any inline [Chord] markers
-        if (lyricOnly.length === 0) { newSlide.remove(); continue; } // skip all-label batches
+          .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, ''); });
         const bodyText = lyricOnly.join('\n');
+        if (!bodyText.trim()) {
+          newSlide.remove();
+          if (useMarkerInsert) insertionIdx--;
+          continue;
+        }
         box.getText().setText(bodyText);
         if (templateFontSize) box.getText().getTextStyle().setFontSize(templateFontSize);
         try {
           newSlide.getNotesPage().getSpeakerNotesShape().getText()
             .setText(chordFormat === 'inline' ? batches[i].join('\n') : convertInlineChordsForNotes_(batches[i]).join('\n'));
-        } catch(e) { /* notes unavailable */ }
+        } catch(e) {}
+        clearSectionMarkers_(newSlide);
       }
     }
-    lastSlide = newSlide;
     created++;
   }
 
   return created;
 }
 
+// Returns {slide, index} for the first slide whose speaker notes contain marker (case-insensitive).
+function findSectionMarker_(pres, marker) {
+  var slides = pres.getSlides();
+  var lc = marker.toLowerCase();
+  for (var i = 0; i < slides.length; i++) {
+    try {
+      var notes = slides[i].getNotesPage().getSpeakerNotesShape().getText().asString().toLowerCase();
+      if (notes.indexOf(lc) >= 0) return { slide: slides[i], index: i };
+    } catch(e) {}
+  }
+  return null;
+}
+
+// Returns the index at which to insert (just before the next section marker, or end of deck).
+function findSectionEnd_(pres, startIdx) {
+  var slides = pres.getSlides();
+  for (var i = startIdx + 1; i < slides.length; i++) {
+    try {
+      var notes = slides[i].getNotesPage().getSpeakerNotesShape().getText().asString();
+      if (/<<[^>]+>>/.test(notes)) return i;
+    } catch(e) {}
+  }
+  return slides.length;
+}
+
+// Removes <<marker>> tokens from a slide's speaker notes so it isn't treated as a section header.
+function clearSectionMarkers_(slide) {
+  try {
+    var shape = slide.getNotesPage().getSpeakerNotesShape();
+    var txt = shape.getText().asString();
+    var cleaned = txt.replace(/<<[^>]+>>/g, '').trim();
+    if (cleaned !== txt.trim()) shape.getText().setText(cleaned);
+  } catch(e) {}
+}
+
+// ─── Convert Word Art to text boxes ──────────────────────────────────────────
+
+// Shadow at 45° (down-right), 5pt offset, 0 blur, 80% black
+// Transform values in EMU (1 PT = 12700 EMU); 5pt * cos(45°) * 12700 ≈ 44907
+var DEFAULT_SHADOW = {
+  type: 'OUTER',
+  color: { rgbColor: { red: 0, green: 0, blue: 0 } },
+  alpha: 0.8,
+  transform: {
+    scaleX: 1, scaleY: 1, shearX: 0, shearY: 0,
+    translateX: 44907, translateY: 44907,
+    unit: 'EMU'
+  },
+  alignment: 'BOTTOM_LEFT',
+  propertyState: 'RENDERED'
+};
+
+function convertWordArt(fromSlide, toSlide) {
+  const pres      = SlidesApp.getActivePresentation();
+  const allSlides = pres.getSlides();
+  const presId    = pres.getId();
+  const start     = Math.max(0, (fromSlide || 1) - 1);
+  const end       = toSlide ? Math.min(allSlides.length, toSlide) : allSlides.length;
+
+  // ── Style defaults ──
+  var fontFamily = 'Comic Sans MS';
+  var fontSize   = 50;
+  var bold = true, italic = false;
+  var fgRed = 1.0, fgGreen = 1.0, fgBlue = 1.0;   // REST API uses 0–1 floats
+  var restAlign  = 'CENTER';
+  var shadow     = DEFAULT_SHADOW;
+
+  // ── Fetch all REST data in one call: position/size, Word Art text, shadows ──
+  const presData = Slides.Presentations.get(presId, {
+    fields: 'slides(objectId,pageElements(objectId,size,transform,wordArt/renderedText,shape/shapeProperties/shadow))'
+  });
+
+  // ── Override style from first-slide text box if present ──
+  const srcBox = findAnyTextShape_(allSlides[start]);
+  if (srcBox) {
+    const ts = srcBox.getText().getTextStyle();
+    const ps = srcBox.getText().getParagraphStyle();
+    fontFamily = ts.getFontFamily() || fontFamily;
+    fontSize   = ts.getFontSize()   || fontSize;
+    bold       = ts.isBold();
+    italic     = ts.isItalic();
+    try {
+      const fg = ts.getForegroundColor();
+      if (fg) {
+        const rgb = fg.asRgbColor();
+        fgRed   = rgb.getRed()   / 255;
+        fgGreen = rgb.getGreen() / 255;
+        fgBlue  = rgb.getBlue()  / 255;
+      }
+    } catch(e) {}
+    try {
+      const a = ps.getParagraphAlignment();
+      const s = a ? a.toString() : '';
+      if (['CENTER','START','END','JUSTIFIED'].indexOf(s) >= 0) restAlign = s;
+    } catch(e) {}
+
+    // Copy shadow from srcBox via REST response
+    const srcId = srcBox.getObjectId();
+    (presData.slides || []).forEach(function(sd) {
+      (sd.pageElements || []).forEach(function(el) {
+        if (el.objectId === srcId && el.shape &&
+            el.shape.shapeProperties && el.shape.shapeProperties.shadow) {
+          shadow = el.shape.shapeProperties.shadow;
+        }
+      });
+    });
+  }
+
+  // ── Build set of slide objectIds in range ──
+  const inRange = {};
+  allSlides.slice(start, end).forEach(function(s) { inRange[s.getObjectId()] = true; });
+
+  // ── Collect Word Art elements in range ──
+  const wordArts = [];
+  (presData.slides || []).forEach(function(sd) {
+    if (!inRange[sd.objectId]) return;
+    (sd.pageElements || []).forEach(function(el) {
+      if (el.wordArt) {
+        wordArts.push({
+          pageObjectId: sd.objectId,
+          deleteId:     el.objectId,
+          text:         el.wordArt.renderedText || '',
+          size:         el.size,
+          transform:    el.transform
+        });
+      }
+    });
+  });
+
+  if (wordArts.length === 0) return 0;
+
+  // ── Build one batchUpdate: delete Word Art + create styled text boxes ──
+  const requests = [];
+  wordArts.forEach(function(wa, i) {
+    const newId = 'wa_box_' + i + '_' + presId.slice(-8);
+
+    requests.push({ deleteObject: { objectId: wa.deleteId } });
+
+    requests.push({
+      createShape: {
+        objectId:          newId,
+        shapeType:         'TEXT_BOX',
+        elementProperties: { pageObjectId: wa.pageObjectId, size: wa.size, transform: wa.transform }
+      }
+    });
+
+    requests.push({
+      insertText: { objectId: newId, insertionIndex: 0, text: wa.text }
+    });
+
+    requests.push({
+      updateTextStyle: {
+        objectId:  newId,
+        style: {
+          fontFamily: fontFamily,
+          fontSize:   { magnitude: fontSize, unit: 'PT' },
+          bold:       bold,
+          italic:     italic,
+          foregroundColor: { opaqueColor: { rgbColor: { red: fgRed, green: fgGreen, blue: fgBlue } } }
+        },
+        textRange: { type: 'ALL' },
+        fields: 'fontFamily,fontSize,bold,italic,foregroundColor'
+      }
+    });
+
+    requests.push({
+      updateParagraphStyle: {
+        objectId:  newId,
+        style:     { alignment: restAlign },
+        textRange: { type: 'ALL' },
+        fields:    'alignment'
+      }
+    });
+
+    requests.push({
+      updateShapeProperties: {
+        objectId:        newId,
+        shapeProperties: { shapeBackgroundFill: { propertyState: 'NOT_RENDERED' }, shadow: shadow },
+        fields:          'shapeBackgroundFill,shadow'
+      }
+    });
+  });
+
+  Logger.log('convertWordArt shadow: ' + JSON.stringify(shadow));
+  Slides.Presentations.batchUpdate({ requests: requests }, presId);
+
+  // Verify: read back the shadow on the first new box
+  if (wordArts.length > 0) {
+    const checkId = 'wa_box_0_' + presId.slice(-8);
+    const check = Slides.Presentations.get(presId, { fields: 'slides(pageElements(objectId,shape/shapeProperties/shadow))' });
+    (check.slides || []).forEach(function(sd) {
+      (sd.pageElements || []).forEach(function(el) {
+        if (el.objectId === checkId)
+          Logger.log('shadow read back: ' + JSON.stringify(el.shape && el.shape.shapeProperties && el.shape.shapeProperties.shadow));
+      });
+    });
+  }
+
+  return wordArts.length;
+}
+
+// ─── Normalize slides ─────────────────────────────────────────────────────────
+//
+// Copies the content box's text style and shape shadow from the first slide in
+// the range to all subsequent slides. Also removes empty text boxes.
+
+function normalizeSlides(fromSlide, toSlide) {
+  const pres      = SlidesApp.getActivePresentation();
+  const allSlides = pres.getSlides();
+  const start = Math.max(0, (fromSlide || 1) - 1);
+  const end   = toSlide ? Math.min(allSlides.length, toSlide) : allSlides.length;
+  if (end <= start + 1) throw new Error('Select at least 2 slides.');
+
+  const srcSlide = allSlides[start];
+  const srcBox   = findAnyTextShape_(srcSlide);
+  if (!srcBox) throw new Error('The first slide uses Word Art or has no text box — select a text box slide as the starting slide.');
+
+  const srcTextStyle = srcBox.getText().getTextStyle();
+  const srcParaStyle = srcBox.getText().getParagraphStyle();
+
+  // Collect source style values (may be null if not explicitly set)
+  const fontFamily = srcTextStyle.getFontFamily();
+  const fontSize   = srcTextStyle.getFontSize();
+  const bold       = srcTextStyle.isBold();
+  const italic     = srcTextStyle.isItalic();
+  const alignment  = srcParaStyle.getParagraphAlignment();
+
+  // Foreground color — extract as RGB if available
+  var fgRed = null, fgGreen = null, fgBlue = null;
+  try {
+    const fg = srcTextStyle.getForegroundColor();
+    if (fg) { const rgb = fg.asRgbColor(); fgRed = rgb.getRed(); fgGreen = rgb.getGreen(); fgBlue = rgb.getBlue(); }
+  } catch(e) {}
+
+  let count = 0;
+  for (let i = start + 1; i < end; i++) {
+    const slide  = allSlides[i];
+    // Skip slides that use Word Art — leave their styling untouched
+    if (slide.getShapes().length === 0 && slide.getPageElements().length > 0) continue;
+    const shapes = slide.getShapes();
+
+    shapes.forEach(function(shape) {
+      var textRange;
+      try { textRange = shape.getText(); } catch(e) { return; } // skip non-text shapes
+      // Remove empty text boxes (TEXT_BOX type only — don't delete layout placeholders)
+      const text = textRange.asString().replace(/[\n\s]/g, '');
+      if (!text) {
+        if (shape.getShapeType() === SlidesApp.ShapeType.TEXT_BOX) shape.remove();
+        return;
+      }
+      // Apply source text style to content box
+      const ts = shape.getText().getTextStyle();
+      const ps = shape.getText().getParagraphStyle();
+      try { if (fontFamily) ts.setFontFamily(fontFamily); } catch(e) {}
+      try { if (fontSize)   ts.setFontSize(fontSize);     } catch(e) {}
+      try { ts.setBold(bold);     } catch(e) {}
+      try { ts.setItalic(italic); } catch(e) {}
+      try { if (fgRed !== null) ts.setForegroundColor(fgRed, fgGreen, fgBlue); } catch(e) {}
+      try { if (alignment) ps.setParagraphAlignment(alignment); } catch(e) {}
+    });
+    count++;
+  }
+
+  // Copy drop shadow via REST API
+  copyShadow_(pres, srcBox, allSlides, start, end);
+
+  return count;
+}
+
+function copyShadow_(pres, srcBox, allSlides, start, end) {
+  const presId  = pres.getId();
+  const srcId   = srcBox.getObjectId();
+  const data    = Slides.Presentations.get(presId, { fields: 'slides(pageElements(objectId,shape/shapeProperties/shadow))' });
+  var srcShadow = null;
+
+  (data.slides || []).forEach(function(sd) {
+    (sd.pageElements || []).forEach(function(el) {
+      if (el.objectId === srcId && el.shape && el.shape.shapeProperties && el.shape.shapeProperties.shadow)
+        srcShadow = el.shape.shapeProperties.shadow;
+    });
+  });
+
+  Logger.log('copyShadow_ srcShadow: ' + JSON.stringify(srcShadow));
+  // If srcBox has no explicit shadow (inherits from theme), fall back to DEFAULT_SHADOW
+  if (!srcShadow) {
+    Logger.log('copyShadow_: no shadow found on srcBox ' + srcId + ', using DEFAULT_SHADOW');
+    srcShadow = DEFAULT_SHADOW;
+  }
+
+  const requests = [];
+  for (let i = start + 1; i < end; i++) {
+    const box = findAnyTextShape_(allSlides[i]);
+    if (!box) continue;
+    requests.push({ updateShapeProperties: { objectId: box.getObjectId(), shapeProperties: { shadow: srcShadow }, fields: 'shadow' } });
+  }
+  if (requests.length) Slides.Presentations.batchUpdate({ requests: requests }, presId);
+}
+
+// ─── Transpose selected slides' speaker notes ─────────────────────────────────
+
+function transposeSelectedNotes(steps, useFlats, fromSlide, toSlide) {
+  const pres = SlidesApp.getActivePresentation();
+  const allSlides = pres.getSlides();
+  const start = Math.max(0, (fromSlide || 1) - 1);
+  const end   = toSlide ? Math.min(allSlides.length, toSlide) : allSlides.length;
+  const slides = allSlides.slice(start, end);
+
+  let count = 0;
+  slides.forEach(function(slide) {
+    try {
+      const notesShape = slide.getNotesPage().getSpeakerNotesShape();
+      const original = notesShape.getText().asString().replace(/\n$/, '');
+      if (!original.trim()) return;
+      const transposed = original.split('\n').map(function(line) {
+        return isChordLine_(line.trim()) ? transposeChordLine_(line, steps, useFlats) : line;
+      }).join('\n');
+      notesShape.getText().setText(transposed);
+      count++;
+    } catch(e) { /* slide has no notes */ }
+  });
+  return count;
+}
+
+function transposeNote_(note, steps, useFlats) {
+  const SHARPS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const FLATS  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+  var i = SHARPS.indexOf(note);
+  if (i < 0) i = FLATS.indexOf(note);
+  if (i < 0) return note;
+  return (useFlats ? FLATS : SHARPS)[((i + steps) % 12 + 12) % 12];
+}
+
+function transposeChordToken_(token, steps, useFlats) {
+  // Strip outer parens: (G) → G; re-add after transposing
+  var outer = token.length > 2 && token[0] === '(' && token[token.length - 1] === ')';
+  if (outer) token = token.slice(1, -1);
+  var slash = token.indexOf('/', 1);
+  var result;
+  if (slash > 0) {
+    result = transposeChordToken_(token.slice(0, slash), steps, useFlats) +
+             '/' + transposeChordToken_(token.slice(slash + 1), steps, useFlats);
+  } else {
+    var hasAcc = token.length > 1 && (token[1] === '#' || token[1] === 'b');
+    var root = hasAcc ? token.slice(0, 2) : token[0];
+    result = transposeNote_(root, steps, useFlats) + token.slice(root.length);
+  }
+  return outer ? '(' + result + ')' : result;
+}
+
+function transposeChordLine_(line, steps, useFlats) {
+  return line.replace(/[^\s]+/g, function(t) { return transposeChordToken_(t, steps, useFlats); });
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getSlideCount() {
+  return SlidesApp.getActivePresentation().getSlides().length;
+}
+
+function getSelectedSlideRange() {
+  try {
+    const pres   = SlidesApp.getActivePresentation();
+    const slides = pres.getSlides();
+    const sel    = pres.getSelection();
+    var from, to;
+    const pageRange = sel.getPageRange();
+    if (pageRange) {
+      const pages = pageRange.getPages();
+      const ids   = slides.map(function(s) { return s.getObjectId(); });
+      const nums  = pages.map(function(p) { return ids.indexOf(p.getObjectId()) + 1; }).filter(function(n) { return n > 0; });
+      if (nums.length) { from = Math.min.apply(null, nums); to = Math.max.apply(null, nums); }
+    }
+    if (!from) {
+      const curId = sel.getCurrentPage().getObjectId();
+      const idx   = slides.findIndex(function(s) { return s.getObjectId() === curId; });
+      if (idx >= 0) { from = idx + 1; to = idx + 1; }
+    }
+    if (!from) return null;
+    // Check for Word Art in range
+    const hasWordArt = slides.slice(from - 1, to).some(function(slide) {
+      return slide.getPageElements().some(function(el) {
+        return el.getPageElementType() === SlidesApp.PageElementType.WORD_ART;
+      });
+    });
+    return { from: from, to: to, hasWordArt: hasWordArt };
+  } catch(e) {}
+  return null;
+}
 
 function getCurrentSlideIndex_() {
   try {
@@ -354,8 +848,46 @@ function isSectionLabel_(line) {
 function isChordLine_(line) {
   var words = line.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return false;
-  var pat = /^[A-G][#b]?(m(aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(\([^)]*\))?(\/[A-G][#b]?)?$/;
-  return words.every(function(w) { return pat.test(w); });
+  var pat = /^[A-G][#b]?(m(?:aj)?|min|dim|aug|sus[24]?|add\d+)?\d*(?:\([^)]*\))?(?:\/[A-G][#b]?)?$/;
+  return words.every(function(w) {
+    if (w.length > 2 && w[0] === '(' && w[w.length - 1] === ')') w = w.slice(1, -1);
+    return pat.test(w);
+  });
+}
+
+// Like findContentBox_ but accepts any shape type that has text content.
+// Used for normalizing pre-existing slides that may use rectangles or placeholders.
+function diagnoseSlide2() {
+  var pres   = SlidesApp.getActivePresentation();
+  var slides = pres.getSlides();
+  Logger.log('Total slides: ' + slides.length);
+
+  var slide = slides[5]; // slide 6
+  var allElements = slide.getPageElements();
+  Logger.log('getPageElements() count: ' + allElements.length);
+  for (var i = 0; i < allElements.length; i++) {
+    Logger.log('  el[' + i + '] pageElementType=' + allElements[i].getPageElementType());
+  }
+
+  var shapes = slide.getShapes();
+  Logger.log('getShapes() count: ' + shapes.length);
+  for (var j = 0; j < shapes.length; j++) {
+    var s = shapes[j];
+    var txt = '';
+    try { txt = s.getText().asString().slice(0, 50); } catch(e) { txt = '(error: ' + e.message + ')'; }
+    Logger.log('  shape[' + j + '] shapeType=' + s.getShapeType() + ' text="' + txt + '"');
+  }
+}
+
+function findAnyTextShape_(slide) {
+  const shapes = slide.getShapes().filter(function(s) {
+    try { return s.getText().asString().replace(/[\n\s]/g, '').length > 0; } catch(e) { return false; }
+  });
+  if (shapes.length === 0) return null;
+  if (shapes.length === 1) return shapes[0];
+  return shapes.sort(function(a, b) {
+    return (b.getWidth() * b.getHeight()) - (a.getWidth() * a.getHeight());
+  })[0];
 }
 
 function findContentBox_(slide) {
