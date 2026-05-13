@@ -20,7 +20,7 @@ Slides are created by duplicating a template slide you design, so they automatic
 
 |             Side panel             |            Generated slides            |
 | :---------------------------------: | :------------------------------------: |
-| ![Side panel](images/SidePanel.png) | ![Generated slides](images/Slides.png) |
+| ![Side panel](assets/SidePanel.png) | ![Generated slides](assets/Slides.png) |
 
 ---
 
@@ -50,22 +50,24 @@ Navigate to that slide in your presentation, **then** open the sidebar from the 
 
 ### Song library
 
-Thousands of worship songs with chords are available for free from multiple sources. Use the **Song Lookup** section to find them.
+Thousands of worship songs with chords are available for free from multiple sources. Use the **Song Lookup** section to find them.  You can
 
-![Song lookup showing searchable list of thousands of worship songs](images/SongLookup.png)
+![Song lookup showing searchable list of thousands of worship songs](assets/SongLookup.png)
 
 #### Sources
 
+Select **All Sources** at the top of the source dropdown to search for songs across every configured source at once. Clicking a song loads it into the INPUT: Songs found in more than one source show a badge with the count; clicking the song expands an inline picker so you can choose which source to load from.
+![Song lookup showing searchable list of thousands of worship songs](assets/SongLookupSources.png)
 
-| Source                              | What's there                                                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **GitHub: mattgraham/worship**      | Thousands of contemporary worship songs in OnSong/ChordPro format — free, no sign-in required                                                   |
-| **Google Drive: EasternGate/Songs** | Your own song library stored as Google Slides files in`EasternGate/Songs` in your Drive                                                          |
-| **GitHub: custom…**                | Any public GitHub repo containing`.onsong` or `.cho` files — enter an owner/repo path or full GitHub URL; the repo is saved for future sessions |
+##### Choosing a Source
 
-#### All Sources
+Clicking on the All Sources dropdown lists all the configured sources, allowing you to choose an individual source.![ChoosingASource.png](assets/ChoosingASource.png?t=1778680239101)
 
-Select **All Sources** at the top of the source dropdown to search across every configured source at once. Songs found in more than one source show a badge with the count; clicking the song expands an inline picker so you can choose which source to load from.
+
+##### Adding a new Source
+
+If you select "GitHub: Custom ..." then you can add a Github repo as a source by entering either a Github URL or repo name. Selecting 
+All sources are stored privately in your own browser local storage.
 
 #### Loading a song
 
@@ -138,19 +140,21 @@ For multi-verse passages, a reference slide (e.g. *John 3:16–21*) is created f
 
 ### Slide tools
 
-These tools operate on slides already in your presentation. Set the slide range using the **slides** fields in the Settings section.
+These tools operate on slides already in your presentation.
+<img src="assets/SelectingSlides.png" align="right" width="120" hspace="20">
 
-**Normalize Slides** — copies the font, text color, and drop shadow from the first slide in the selected range to all other slides in that range. Also removes any empty text boxes. Useful for cleaning up imported or manually edited slides.
+<img src="assets/SelectingSlides.png" align="right" width="150" hspace="20">
+You can set the slide numbers manually by entering the exact slide numbers, or by selecting a range of slides as shown above and to the right. Whenever you select a range of slides, the numbers are automatically filled in for you.
 
-**Convert Word Art** — replaces Word Art elements in the selected slides with styled text boxes, using the font and shadow style of the first slide in the range. Word Art cannot be edited in the same way as text boxes, so converting is recommended after importing older presentations.
+**Transpose Existing Slides** — retransposes the chord lines in the speaker notes of the selected slides by the current Transpose amount. Useful when you decide to change key after slides have already been created. It transposes the lyrics in the Notes of the selected slides.  Clicking the "Transpost Existing Slides" button repeatedly, will change the key again. So you can set the transpose value to +1 or -1, and keep clicking until the chords are ideal for your voice and instruments.
 
-**Transpose Existing Slides** — retransposes the chord lines in the speaker notes of the selected slides by the current Transpose amount. Useful when you decide to change key after slides have already been created.
+**Normalize** -- distributes the formatting from the first slide in the selection to all selected slides
 
----
+![Tools.png](assets/Tools.png)
 
 ## Settings
 
-In the Settings panel, you can specify the maximum line length for line-wrapping, and how many lines to fit into each slide.  Whether to place chords above the lyrics, or inline like this [Gm].   To transpose existing slides, select the desired set of slides and click "Transpose Existing Slides".  Also, you change the format of any slide, and then select that slide along with others below it and distribute those settings changes to them by clicking "Normalize"
+In the Settings panel, you can specify the maximum line length for line-wrapping, and how many lines to fit into each slide.  Whether to place chords above the lyrics, or inline like this [Gm].  The transpose value will apply to all songs in the INPUT and will immediately be applied to the OUTPUT.  You can click the + or - signs and immediately see the changes in the OUTPUT.  The same transpose setting applies when transposing existing slides but does not happen until you click the button.
 
 ![Settings.png](assets/Settings.png)
 

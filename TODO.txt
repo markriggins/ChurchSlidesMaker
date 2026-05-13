@@ -1,0 +1,9 @@
+
+Create a GS Add-on so anyone can use it
+
+add other lyric sites: https://github.com/joeycortez42/worship
++++ https://www.worshiptabs.com/song/charity-gayle/name-above-all-names-2344763
+
+https://www.worshipchords.net/guitar/alfred-ackley/he-lives
+
+❯ Can you add an "All Sources" drop down on the Song Lookup panel to search all sources.  When a song it found on multiple sources, give a drop down to chose the prefered source

@@ -18,6 +18,7 @@ function onOpen(e) {
     .createMenu('ChurchSlidesMaker')
     .addItem('Open ChurchSlidesMaker', 'showSidebar')
     .addToUi();
+  showSidebar();
 }
 
 function onInstall(e) {
@@ -160,20 +161,37 @@ function fetchSongList(repoPath, githubToken) {
   return songs;
 }
 
-// Lists Google Slides files in the user's Drive at EasternGate/Songs.
+// Lists Google Slides files in a Drive folder.
+// folderPath: "Parent/Child" path, a bare folder ID, or null (defaults to EasternGate/Songs).
 // Returns [{name, url}] where url = "drive://<fileId>".
-function getDriveSongsList() {
+function getDriveSongsList(folderPath) {
+  folderPath = folderPath || 'EasternGate/Songs';
+
   const cache = CacheService.getScriptCache();
-  const cached = cache.get('driveSongsList');
+  const cacheKey = 'driveSongs_' + folderPath.replace(/[^a-zA-Z0-9]/g, '_');
+  const cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
   var folder = null;
-  var tops = DriveApp.getFoldersByName('EasternGate');
-  while (tops.hasNext()) {
-    var subs = tops.next().getFoldersByName('Songs');
-    if (subs.hasNext()) { folder = subs.next(); break; }
+
+  // Try as a folder ID (26+ alphanumeric characters).
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(folderPath)) {
+    try { folder = DriveApp.getFolderById(folderPath); } catch(e) {}
   }
-  if (!folder) throw new Error('Could not find EasternGate/Songs folder in Google Drive.');
+
+  // Fall back to resolving as a slash-separated folder path.
+  if (!folder) {
+    var parts = folderPath.split('/').map(function(p) { return p.trim(); }).filter(Boolean);
+    if (!parts.length) throw new Error('Invalid folder path: ' + folderPath);
+    var tops = DriveApp.getFoldersByName(parts[0]);
+    if (!tops.hasNext()) throw new Error('Folder "' + parts[0] + '" not found in Google Drive.');
+    folder = tops.next();
+    for (var i = 1; i < parts.length; i++) {
+      var subs = folder.getFoldersByName(parts[i]);
+      if (!subs.hasNext()) throw new Error('Subfolder "' + parts[i] + '" not found inside "' + parts[i-1] + '".');
+      folder = subs.next();
+    }
+  }
 
   var songs = [];
   var files = folder.getFilesByType(MimeType.GOOGLE_SLIDES);
@@ -183,7 +201,7 @@ function getDriveSongsList() {
   }
   songs.sort(function(a, b) { return a.name.localeCompare(b.name); });
 
-  try { cache.put('driveSongsList', JSON.stringify(songs), 3600); } catch(e) {}
+  try { cache.put(cacheKey, JSON.stringify(songs), 3600); } catch(e) {}
   return songs;
 }
 
@@ -956,6 +974,7 @@ function convertInlineChordsForNotes_(lines) {
         var chord = line.slice(j + 1, end);
         if (/^[A-G]/.test(chord)) {
           while (chords.length < pos) chords += ' ';
+          if (chords.length > 0 && chords[chords.length - 1] !== ' ') chords += ' ';
           chords += chord;
         }
         j = end + 1;

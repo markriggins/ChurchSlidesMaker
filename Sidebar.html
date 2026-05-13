@@ -139,15 +139,29 @@
 <div class="section">
   <div class="section-head collapsed" onclick="toggleSongSection(this)">🎵 Song Lookup</div>
   <div class="section-body" style="display:none">
-    <select id="songSource" onchange="onSongSourceChange()" style="width:100%;margin-bottom:4px">
-      <option value="all">All Sources</option>
-      <option value="github:mattgraham/worship">GitHub: mattgraham/worship</option>
-      <option value="drive">Google Drive: EasternGate/Songs</option>
-      <option value="github:custom">GitHub: custom…</option>
-    </select>
+    <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+      <select id="songSource" onchange="onSongSourceChange()" style="flex:1;min-width:0">
+        <option value="all">All Sources</option>
+        <option value="github:mattgraham/worship">GitHub: mattgraham/worship</option>
+        <option value="drive">Google Drive: EasternGate/Songs</option>
+        <option value="github:custom">GitHub: custom…</option>
+        <option value="drive:custom">Google Drive: custom…</option>
+      </select>
+      <button id="deleteSourceBtn" onclick="deleteCurrentSource()"
+        style="display:none;width:20px;height:20px;padding:0;background:#c33;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:15px;line-height:1;flex-shrink:0"
+        title="Remove this source">×</button>
+    </div>
+    <div id="deleteConfirm" style="display:none;align-items:center;gap:5px;margin-bottom:4px;font-size:11px;color:#555">
+      <span>Remove this source?</span>
+      <button onclick="confirmDeleteSource()" style="padding:1px 7px;background:#c33;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px">Yes</button>
+      <button onclick="cancelDeleteSource()" style="padding:1px 7px;background:#888;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px">No</button>
+    </div>
     <input type="text" id="customSongRepo" placeholder="owner/repo or GitHub URL"
            style="width:100%;margin-bottom:4px;display:none"
            onchange="onCustomRepoEnter()">
+    <input type="text" id="customDriveFolder" placeholder="Folder name or path, e.g. EasternGate/Songs"
+           style="width:100%;margin-bottom:4px;display:none"
+           onchange="onCustomDriveFolderEnter()">
     <div class="row">
       <span class="lbl">GitHub token:</span>
       <input type="password" id="githubToken" placeholder="optional — raises rate limit"
@@ -221,12 +235,20 @@
         <option value="inline">Inline [chords]</option>
       </select>
     </div>
+  </div>
+</div>
+
+<!-- ── Slide Tools ────────────────────────────────────── -->
+<div class="section">
+  <div class="section-head collapsed" onclick="toggle(this)">🛠 Slide Tools</div>
+  <div class="section-body" style="display:none">
     <div class="row">
-      <span class="lbl">Transpose notes:</span>
-      <span class="lbl">slides</span>
+      <span class="lbl">Slides:</span>
       <input type="number" id="transFrom" min="1" style="width:46px" value="1">
       <span class="lbl">–</span>
       <input type="number" id="transTo" min="1" style="width:46px" value="">
+    </div>
+    <div class="row">
       <button class="btn btn-blue" onclick="transposeSelectedNotes()" title="Shift all chords in the speaker notes of the selected slides up or down by the Transpose amount">Transpose Existing Slides</button>
       <button class="btn btn-blue" onclick="normalizeSlides()" title="Copy the font, text color, and drop shadow from the first selected slide to all other text-box slides in the range. Also removes empty text boxes.">Normalize</button>
       <button class="btn btn-blue" id="convertWordArtBtn" onclick="convertWordArt()" style="display:none" title="Replace Word Art elements in the selected slides with text boxes, using the style of the first slide (or Comic Sans MS with a black drop shadow if the first slide has no text box).">Convert Word Art</button>
@@ -447,7 +469,7 @@ var lastVerses      = null;
 var lastCanonical   = '';
 var outputIsScripture = false;
 
-// Restore saved custom GitHub repos into the source dropdown.
+// Restore saved custom sources into the source dropdown.
 (function loadSavedRepos() {
   var saved = JSON.parse(localStorage.getItem('savedSongRepos') || '[]');
   var select = document.getElementById('songSource');
@@ -458,6 +480,24 @@ var outputIsScripture = false;
     var opt = document.createElement('option');
     opt.value = val;
     opt.textContent = 'GitHub: ' + repo;
+    select.insertBefore(opt, anchor);
+  });
+})();
+
+(function loadSavedDriveFolders() {
+  var saved = JSON.parse(localStorage.getItem('savedDriveFolders') || '[]');
+  var select = document.getElementById('songSource');
+  var anchor = select.querySelector('option[value="drive:custom"]');
+  saved.forEach(function(folder) {
+    var val = 'drive:' + folder;
+    var found = false;
+    for (var i = 0; i < select.options.length; i++) {
+      if (select.options[i].value === val) { found = true; break; }
+    }
+    if (found) return;
+    var opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = 'Google Drive: ' + folder;
     select.insertBefore(opt, anchor);
   });
 })();
@@ -646,61 +686,110 @@ function toggleSongSection(head) {
   }
 }
 
+// Values that cannot be deleted by the user.
+var NON_DELETABLE = {'all':1,'github:mattgraham/worship':1,'drive':1,'github:custom':1,'drive:custom':1};
+
 function getSongSource() {
   var src = document.getElementById('songSource').value;
   if (src === 'github:custom') {
     var val = document.getElementById('customSongRepo').value.trim();
     return val ? 'github:' + val : null;
   }
+  if (src === 'drive:custom') {
+    var val = document.getElementById('customDriveFolder').value.trim();
+    return val ? 'drive:' + val : null;
+  }
   return src;
 }
 
 function onSongSourceChange() {
   var src = document.getElementById('songSource').value;
-  document.getElementById('customSongRepo').style.display = src === 'github:custom' ? '' : 'none';
-  if (src !== 'github:custom') { songCatalog = null; loadSongCatalog(); }
+  document.getElementById('customSongRepo').style.display   = src === 'github:custom' ? '' : 'none';
+  document.getElementById('customDriveFolder').style.display = src === 'drive:custom'  ? '' : 'none';
+  document.getElementById('deleteSourceBtn').style.display   = NON_DELETABLE[src] ? 'none' : '';
+  if (src !== 'github:custom' && src !== 'drive:custom') { songCatalog = null; loadSongCatalog(); }
 }
 
 function onCustomRepoEnter() {
   var el = document.getElementById('customSongRepo');
   var val = el.value.trim();
   if (!val) return;
-  // Translate full GitHub URLs to owner/repo[/tree/branch/subdir]
   var m = val.match(/^(?:https?:\/\/)?github\.com\/(.+)/);
   if (m) { val = m[1].replace(/\/+$/, ''); el.value = val; }
   songCatalog = null;
   loadSongCatalog();
 }
 
+function onCustomDriveFolderEnter() {
+  var val = document.getElementById('customDriveFolder').value.trim();
+  if (!val) return;
+  songCatalog = null;
+  loadSongCatalog();
+}
+
+function deleteCurrentSource() {
+  document.getElementById('deleteSourceBtn').style.display = 'none';
+  document.getElementById('deleteConfirm').style.display = 'flex';
+}
+
+function confirmDeleteSource() {
+  document.getElementById('deleteConfirm').style.display = 'none';
+  var select = document.getElementById('songSource');
+  var opt    = select.options[select.selectedIndex];
+  var val    = opt.value;
+  if (val.indexOf('github:') === 0) {
+    var repo  = val.slice(7);
+    var saved = JSON.parse(localStorage.getItem('savedSongRepos') || '[]');
+    localStorage.setItem('savedSongRepos', JSON.stringify(saved.filter(function(r) { return r !== repo; })));
+  } else if (val.indexOf('drive:') === 0) {
+    var folder = val.slice(6);
+    var saved  = JSON.parse(localStorage.getItem('savedDriveFolders') || '[]');
+    localStorage.setItem('savedDriveFolders', JSON.stringify(saved.filter(function(f) { return f !== folder; })));
+  }
+  select.selectedIndex = 0;
+  opt.remove();
+  onSongSourceChange();
+}
+
+function cancelDeleteSource() {
+  document.getElementById('deleteConfirm').style.display = 'none';
+  document.getElementById('deleteSourceBtn').style.display = '';
+}
+
 function loadSongCatalog() {
   var source = getSongSource();
   if (!source) return;
   if (source === 'all') { loadAllSourcesCatalog(); return; }
-  var isCustomEntry = document.getElementById('songSource').value === 'github:custom';
-  var repoPath = source.replace(/^github:/, '');
+  var selVal        = document.getElementById('songSource').value;
+  var isCustomGH    = selVal === 'github:custom';
+  var isCustomDrive = selVal === 'drive:custom';
+  var isDrive       = source === 'drive' || source.indexOf('drive:') === 0;
+  var folderPath    = source.indexOf('drive:') === 0 ? source.slice(6) : null;
+  var repoPath      = !isDrive ? source.replace(/^github:/, '') : null;
   setSongStatus('Loading song list…');
   var runner = google.script.run
     .withSuccessHandler(function(songs) {
       songCatalog = songs;
       setSongStatus('');
-      if (isCustomEntry && repoPath) saveCustomRepo(repoPath);
+      if (isCustomGH    && repoPath)    saveCustomRepo(repoPath);
+      if (isCustomDrive && folderPath)  saveCustomDriveFolder(folderPath);
       filterSongs(document.getElementById('songSearch').value);
     })
     .withFailureHandler(function(e) { setSongStatus(e.message, true); });
-  if (source === 'drive') {
-    runner.getDriveSongsList();
+  if (isDrive) {
+    runner.getDriveSongsList(folderPath);
   } else {
     runner.fetchSongList(repoPath, getGithubToken());
   }
 }
 
-// Returns all source configs from the dropdown (excluding meta-options 'all' and 'github:custom').
+// Returns all source configs from the dropdown (excluding meta/template options).
 function getAllSourceConfigs() {
   var select = document.getElementById('songSource');
   var configs = [];
   for (var i = 0; i < select.options.length; i++) {
     var opt = select.options[i];
-    if (opt.value === 'all' || opt.value === 'github:custom') continue;
+    if (NON_DELETABLE[opt.value]) continue;
     configs.push({ value: opt.value, label: opt.text });
   }
   return configs;
@@ -730,7 +819,9 @@ function loadAllSourcesCatalog() {
       })
       .withFailureHandler(function() { onDone(); });
     if (cfg.value === 'drive') {
-      runner.getDriveSongsList();
+      runner.getDriveSongsList(null);
+    } else if (cfg.value.indexOf('drive:') === 0) {
+      runner.getDriveSongsList(cfg.value.slice(6));
     } else {
       runner.fetchSongList(cfg.value.replace(/^github:/, ''), getGithubToken());
     }
@@ -766,7 +857,6 @@ function saveCustomRepo(repo) {
   if (saved.indexOf(repo) >= 0) return;
   saved.push(repo);
   localStorage.setItem('savedSongRepos', JSON.stringify(saved));
-  // Add to dropdown and select it
   var select = document.getElementById('songSource');
   var anchor = select.querySelector('option[value="github:custom"]');
   var opt = document.createElement('option');
@@ -775,6 +865,23 @@ function saveCustomRepo(repo) {
   select.insertBefore(opt, anchor);
   select.value = 'github:' + repo;
   document.getElementById('customSongRepo').style.display = 'none';
+  document.getElementById('deleteSourceBtn').style.display = '';
+}
+
+function saveCustomDriveFolder(folder) {
+  var saved = JSON.parse(localStorage.getItem('savedDriveFolders') || '[]');
+  if (saved.indexOf(folder) >= 0) return;
+  saved.push(folder);
+  localStorage.setItem('savedDriveFolders', JSON.stringify(saved));
+  var select = document.getElementById('songSource');
+  var anchor = select.querySelector('option[value="drive:custom"]');
+  var opt = document.createElement('option');
+  opt.value = 'drive:' + folder;
+  opt.textContent = 'Google Drive: ' + folder;
+  select.insertBefore(opt, anchor);
+  select.value = 'drive:' + folder;
+  document.getElementById('customDriveFolder').style.display = 'none';
+  document.getElementById('deleteSourceBtn').style.display = '';
 }
 
 function setSongStatus(msg, isErr) {
@@ -940,6 +1047,7 @@ function parseOnSong(raw) {
         var chord = line.slice(j + 1, end);
         if (/^[A-G]/.test(chord)) {
           while (chords.length < pos) chords += ' ';
+          if (chords.length > 0 && chords[chords.length - 1] !== ' ') chords += ' ';
           chords += chord;
         }
         j = end + 1;
