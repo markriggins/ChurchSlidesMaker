@@ -1,21 +1,26 @@
 # ChurchSlidesMaker
 
-A Google Apps Script sidebar for Google Slides that creates church presentation slides from song lyrics (with chords) and scripture passages.
+Quickly and
+
+Automatically create church presentation slides from song lyrics (with chords) and scripture passages.
 
 ---
 
 ## What it does
 
+- **Song library** — search thousands of worship songs with chords from multiple free sources and load them in one click
 - **Song lyrics** — paste chord+lyric text in chord-above or ChordPro inline `[Chord]` format; chords are stripped from slide bodies and preserved in speaker notes for the worship team
-- **Song library** — search thousands of worship songs with chords from the [mattgraham/worship](https://github.com/mattgraham/worship) OnSong library and load them in one click
-- **Scripture** — look up any passage by reference in KJV, ESV, or WEB; the text is fetched and formatted automatically, with your choice of translation and verse number display
-- **Transpose** — shift chords up or down any number of semitones, with sharps or flats
+- **Transpose** — shift any song to a different key instantly, with your choice of sharps or flats
+- **Scripture** — look up any passage by reference in KJV, ESV, or WEB; fetched and formatted automatically
+- **Auto-scaling font** — slides automatically shrink the font to fit when a slide has more or longer lines than usual
+- **Smart splitting** — long sections are distributed evenly across slides (8 lines → 4+4, never 6+2); wrapped lines always stay together
 
-Slides are created by duplicating a template slide you choose, so they automatically inherit your presentation's fonts, colors, and background.
+Slides are created by duplicating a template slide you design, so they automatically inherit your presentation's fonts, colors, and background.
 
-| Side panel | Generated slides |
-|:---:|:---:|
-| ![Side panel](docs/SidePanel.png) | ![Generated slides](docs/Slides.png) |
+
+|             Side panel             |            Generated slides            |
+| :---------------------------------: | :------------------------------------: |
+| ![Side panel](images/SidePanel.png) | ![Generated slides](images/Slides.png) |
 
 ---
 
@@ -26,50 +31,92 @@ Slides are created by duplicating a template slide you choose, so they automatic
 Before creating slides you need a **template slide** — a slide you design once that all generated slides will be copied from. It must contain at least one text box, which is where the lyrics or scripture text will be placed.
 
 Design your template slide with:
-- The **background** you want (photo, solid color, gradient, etc.)
-- The **font, size, and color** for the lyric/scripture display
-- A **text box** sized and positioned where you want the words to appear
-- A **typical note** with the font, size and color for the presenter's notes, which for songs will contain the lyrics and chords
 
-Navigate to that slide in your presentation, **then** open the sidebar from the ChurchSlidesMaker menu. The sidebar captures the current slide as the template at the moment it opens — every slide created in that session will be a copy of it, inheriting its background, font, and text size.
+- The **background** you want (photo, solid color, gradient, etc.)
+- The **font, size, and color** for the lyric/scripture text
+- A **text box** sized and positioned where you want the words to appear
+- A **note** with the font, size, and style you want for the presenter's notes (for song slides, the notes will contain the full lyrics and chords)
+
+Then add a marker to the slide's **speaker notes** so ChurchSlidesMaker knows which slide is the template:
+
+- `<<songs section>>` — marks the template for song slides
+- `<<scriptures>>` — marks the template for scripture slides
+
+Navigate to that slide in your presentation, **then** open the sidebar from the ChurchSlidesMaker menu. New song slides are appended to the end of the songs section, and new scripture slides are appended to the end of the scriptures section — so your presentation stays organized automatically.
+
+> **Tip:** You can have both markers in the same presentation — one slide for songs, one for scripture — each with its own background and font style.
+
+---
 
 ### Song library
 
-Thousands of worship songs with chords are available built-in:
+Thousands of worship songs with chords are available for free from multiple sources. Use the **Song Lookup** section to find them.
 
-1. Expand the **Song Lookup** section (loads the catalog on first open)
+![Song lookup showing searchable list of thousands of worship songs](images/SongLookup.png)
+
+#### Sources
+
+
+| Source                              | What's there                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **GitHub: mattgraham/worship**      | Thousands of contemporary worship songs in OnSong/ChordPro format — free, no sign-in required                                                   |
+| **Google Drive: EasternGate/Songs** | Your own song library stored as Google Slides files in`EasternGate/Songs` in your Drive                                                          |
+| **GitHub: custom…**                | Any public GitHub repo containing`.onsong` or `.cho` files — enter an owner/repo path or full GitHub URL; the repo is saved for future sessions |
+
+#### All Sources
+
+Select **All Sources** at the top of the source dropdown to search across every configured source at once. Songs found in more than one source show a badge with the count; clicking the song expands an inline picker so you can choose which source to load from.
+
+#### Loading a song
+
+1. Expand the **Song Lookup** section (the catalog loads on first open)
 2. Type any part of a song title to filter
-3. Click a song to load it into the Input box
+3. Click a song to load it into the Input box — or, for multi-source songs, click to expand and choose your preferred source
 
-![Song lookup showing searchable list of thousands of worship songs](docs/SongLookup.png)
+---
 
-Songs are sourced from the [mattgraham/worship](https://github.com/mattgraham/worship) repository in OnSong/ChordPro format.
+### Transposing to a different key
+
+Transpose any song to the key that fits your team before creating slides:
+
+1. Use the **−** / **+** buttons next to **Transpose** in the Settings section to set how many semitones to shift (shown as `+2`, `−3`, etc.)
+2. Choose **Sharps (#)** or **Flats (♭)** to match your band's preference
+3. The Output preview updates immediately — chords in both the slide body preview and the speaker notes are transposed
+
+**Transpose Existing Slides** (in the Settings section) retransposes the chords already in the speaker notes of slides you've already created — useful if you decide to change keys after the fact. Set the slide range and click the button.
+
+---
 
 ### Song lyrics
 
-You can also paste lyrics directly instead of using the song library:
+You can paste lyrics directly instead of (or in addition to) using the song library:
 
 1. Paste chord+lyric text into the **Input** box — either chord-above format or ChordPro inline `[Chord]lyric` format
 2. The **Output** box shows a preview with chords formatted above lyrics and lines wrapped to the configured width
 3. Click **▶ Create Slides**
 
 **What goes where:**
-- Slide body — lyric lines only (chords stripped)
-- Speaker notes — full chord+lyric text (useful for the worship team)
+
+- Slide body — lyric lines only (chords stripped), font auto-scales to fit
+- Speaker notes — full chord+lyric text, formatted for the worship team
 
 **Chord format toggle:**
+
 - *Above lyrics* — chords rendered on a separate line above each lyric line in the output and notes
 - *Inline [chords]* — raw ChordPro notation preserved in notes; output shows lyrics only
 
 **Slide splitting:**
+
 - Songs break at `[Verse]`, `[Chorus]`, `[Bridge]` and other section labels
 - Blank lines in the source force a new slide (use these to mark stanza boundaries)
 - When a section needs multiple slides, lines are distributed evenly (e.g. 8 lines with Lines/slide=6 becomes 4+4, not 6+2)
-- Chord+lyric pairs are never split; a chord line is always kept with its lyric line
+- Chord+lyric pairs and wrapped line continuations are never split across slides
 
 **During the presentation**, the worship team can follow along using Google Slides Presenter View — lyrics appear on screen for the congregation while chords and full text show in the speaker notes.
 
-![Presenter view showing lyrics on slide and chords in speaker notes](docs/PresentationView.png)
+![PresentationViewSong.png](assets/PresentationViewSong.png)
+
+---
 
 ### Scripture
 
@@ -79,33 +126,33 @@ You can also paste lyrics directly instead of using the song library:
 4. Click **Look Up**
 5. The formatted passage appears in the output — click **▶ Create Slides**
 
-For multi-verse passages, a reference slide (e.g. *John 3:16–21*) is created first at 1.7× font size, followed by the content slides.
+For multi-verse passages, a reference slide (e.g. *John 3:16–21*) is created first at a larger font size, followed by the content slides. Speaker notes on scripture slides are left blank but styled to match your template.
 
 **Translation options:**
+
 - **KJV** (King James Version) — free, no key required
 - **WEB** (World English Bible) — free, no key required
 - **ESV** (English Standard Version) — requires a free API key from [api.esv.org](https://api.esv.org); enter it in the ESV key field
 
 ---
 
-## Settings
+### Slide tools
 
-| Setting | Description |
-|---|---|
-| **Line width** | Maximum characters per line before wrapping (default 30) |
-| **Lines/slide** | Maximum lyric lines per slide before splitting (default 6) |
-| **Transpose** | Semitones to shift all chords up (+) or down (−) |
-| **Accidentals** | Use sharps (#) or flats (♭) when transposing |
-| **Chord format** | Display chords above lyrics or inline in the output preview |
+These tools operate on slides already in your presentation. Set the slide range using the **slides** fields in the Settings section.
 
-Scripture-specific options (in the Scripture Lookup section):
+**Normalize Slides** — copies the font, text color, and drop shadow from the first slide in the selected range to all other slides in that range. Also removes any empty text boxes. Useful for cleaning up imported or manually edited slides.
 
-| Setting | Description |
-|---|---|
-| **Verse #s** | Show verse numbers (e.g. `16: For God so loved…`) |
-| **He/Him** | Capitalize pronouns referring to God/Jesus |
+**Convert Word Art** — replaces Word Art elements in the selected slides with styled text boxes, using the font and shadow style of the first slide in the range. Word Art cannot be edited in the same way as text boxes, so converting is recommended after importing older presentations.
+
+**Transpose Existing Slides** — retransposes the chord lines in the speaker notes of the selected slides by the current Transpose amount. Useful when you decide to change key after slides have already been created.
 
 ---
+
+## Settings
+
+In the Settings panel, you can specify the maximum line length for line-wrapping, and how many lines to fit into each slide.  Whether to place chords above the lyrics, or inline like this [Gm].   To transpose existing slides, select the desired set of slides and click "Transpose Existing Slides".  Also, you change the format of any slide, and then select that slide along with others below it and distribute those settings changes to them by clicking "Normalize"
+
+![Settings.png](assets/Settings.png)
 
 ## Setup
 
