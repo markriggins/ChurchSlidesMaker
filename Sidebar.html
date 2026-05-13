@@ -140,6 +140,7 @@
   <div class="section-head collapsed" onclick="toggleSongSection(this)">🎵 Song Lookup</div>
   <div class="section-body" style="display:none">
     <select id="songSource" onchange="onSongSourceChange()" style="width:100%;margin-bottom:4px">
+      <option value="all">All Sources</option>
       <option value="github:mattgraham/worship">GitHub: mattgraham/worship</option>
       <option value="drive">Google Drive: EasternGate/Songs</option>
       <option value="github:custom">GitHub: custom…</option>
@@ -674,6 +675,7 @@ function onCustomRepoEnter() {
 function loadSongCatalog() {
   var source = getSongSource();
   if (!source) return;
+  if (source === 'all') { loadAllSourcesCatalog(); return; }
   var isCustomEntry = document.getElementById('songSource').value === 'github:custom';
   var repoPath = source.replace(/^github:/, '');
   setSongStatus('Loading song list…');
@@ -690,6 +692,73 @@ function loadSongCatalog() {
   } else {
     runner.fetchSongList(repoPath, getGithubToken());
   }
+}
+
+// Returns all source configs from the dropdown (excluding meta-options 'all' and 'github:custom').
+function getAllSourceConfigs() {
+  var select = document.getElementById('songSource');
+  var configs = [];
+  for (var i = 0; i < select.options.length; i++) {
+    var opt = select.options[i];
+    if (opt.value === 'all' || opt.value === 'github:custom') continue;
+    configs.push({ value: opt.value, label: opt.text });
+  }
+  return configs;
+}
+
+function loadAllSourcesCatalog() {
+  var configs = getAllSourceConfigs();
+  if (!configs.length) { setSongStatus('No sources configured.'); songCatalog = []; return; }
+  setSongStatus('Loading ' + configs.length + ' source(s)…');
+  var allResults = [];
+  var remaining = configs.length;
+
+  function onDone() {
+    remaining--;
+    if (remaining > 0) {
+      setSongStatus('Loading… (' + (configs.length - remaining) + '/' + configs.length + ')');
+      return;
+    }
+    mergeAllSourceCatalogs(allResults);
+  }
+
+  configs.forEach(function(cfg) {
+    var runner = google.script.run
+      .withSuccessHandler(function(songs) {
+        allResults.push({ songs: songs, label: cfg.label });
+        onDone();
+      })
+      .withFailureHandler(function() { onDone(); });
+    if (cfg.value === 'drive') {
+      runner.getDriveSongsList();
+    } else {
+      runner.fetchSongList(cfg.value.replace(/^github:/, ''), getGithubToken());
+    }
+  });
+}
+
+function mergeAllSourceCatalogs(allResults) {
+  var map = {}; // normalizedKey -> {name, entries:[{label,url}]}
+  allResults.forEach(function(result) {
+    (result.songs || []).forEach(function(song) {
+      var key = song.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!map[key]) map[key] = { name: song.name, entries: [] };
+      map[key].entries.push({ label: result.label, url: song.url });
+    });
+  });
+  var merged = [];
+  Object.keys(map).forEach(function(k) {
+    var item = map[k];
+    merged.push({
+      name:    item.name,
+      url:     item.entries[0].url,
+      sources: item.entries.length > 1 ? item.entries : null
+    });
+  });
+  merged.sort(function(a, b) { return a.name.localeCompare(b.name); });
+  songCatalog = merged;
+  setSongStatus(merged.length + ' song(s) across ' + allResults.length + ' source(s).');
+  filterSongs(document.getElementById('songSearch').value);
 }
 
 function saveCustomRepo(repo) {
@@ -714,22 +783,55 @@ function setSongStatus(msg, isErr) {
   el.className = 'status' + (isErr ? ' err' : '');
 }
 
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function filterSongs(q) {
   var list = document.getElementById('songList');
   if (!songCatalog) { list.innerHTML = ''; return; }
-  var matches = q.trim()
-    ? songCatalog.filter(function(s) { return s.name.toLowerCase().indexOf(q.toLowerCase()) >= 0; })
+  var lq = q.trim().toLowerCase();
+  var matches = lq
+    ? songCatalog.filter(function(s) { return s.name.toLowerCase().indexOf(lq) >= 0; })
     : songCatalog;
   list.innerHTML = '';
   matches.slice(0, 80).forEach(function(s) {
     var div = document.createElement('div');
     div.className = 'song-item';
-    div.textContent = s.name;
-    div.dataset.url = s.url;
-    div.dataset.name = s.name;
-    div.addEventListener('click', function() { loadSong(this.dataset.url, this.dataset.name); });
+    if (s.sources) {
+      div.innerHTML = '<span>' + escHtml(s.name) + '</span>'
+        + ' <span style="font-size:9px;color:#888;background:#f0f0f0;border-radius:2px;padding:1px 4px">'
+        + s.sources.length + ' sources</span>';
+      div.addEventListener('click', function(e) { toggleSourcePicker(div, s); });
+    } else {
+      div.textContent = s.name;
+      div.dataset.url  = s.url;
+      div.dataset.name = s.name;
+      div.addEventListener('click', function() { loadSong(this.dataset.url, this.dataset.name); });
+    }
     list.appendChild(div);
   });
+}
+
+function toggleSourcePicker(div, song) {
+  var existing = div.querySelector('.source-picker');
+  if (existing) { existing.remove(); return; }
+  var picker = document.createElement('div');
+  picker.className = 'source-picker';
+  picker.style.cssText = 'margin-top:4px;border-top:1px solid #e8e8e8;padding-top:4px';
+  song.sources.forEach(function(src) {
+    var row = document.createElement('div');
+    row.style.cssText = 'padding:3px 8px;cursor:pointer;font-size:11px;color:#333;border-radius:2px';
+    row.textContent = '↳ ' + src.label;
+    row.addEventListener('mouseover', function() { this.style.background = '#eef4ff'; });
+    row.addEventListener('mouseout',  function() { this.style.background = ''; });
+    row.addEventListener('click', function(e) {
+      e.stopPropagation();
+      loadSong(src.url, song.name);
+    });
+    picker.appendChild(row);
+  });
+  div.appendChild(picker);
 }
 
 function loadSong(url, name) {

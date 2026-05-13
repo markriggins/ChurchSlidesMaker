@@ -361,9 +361,37 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
   const templateBox = findContentBox_(templateSlide);
   if (!templateBox) throw new Error('No text box found on the template slide.');
 
-  // Save the template font size before any modifications so content slides can restore it.
-  var templateFontSize = null;
+  // Read template font size and alignment (alignment as REST API string).
+  var templateFontSize = null, templateAlignStr = null;
   try { templateFontSize = templateBox.getText().getTextStyle().getFontSize(); } catch(e) {}
+  if (!templateFontSize) {
+    // GAS returns null when font size is inherited from theme/layout — fall back to REST API.
+    try {
+      var _fd = Slides.Presentations.get(pres.getId(), {
+        fields: 'slides(pageElements(objectId,shape/text/textElements/textRun/style/fontSize))'
+      });
+      var _ftid = templateBox.getObjectId();
+      (_fd.slides || []).some(function(sd) {
+        return (sd.pageElements || []).some(function(el) {
+          if (el.objectId !== _ftid) return false;
+          return (((el.shape || {}).text || {}).textElements || []).some(function(te) {
+            if (te.textRun && te.textRun.style && te.textRun.style.fontSize) {
+              templateFontSize = te.textRun.style.fontSize.magnitude;
+              return true;
+            }
+            return false;
+          });
+        });
+      });
+    } catch(e) {}
+  }
+  try {
+    var _ta = templateBox.getText().getParagraphStyle().getParagraphAlignment();
+    if      (_ta === SlidesApp.ParagraphAlignment.CENTER)    templateAlignStr = 'CENTER';
+    else if (_ta === SlidesApp.ParagraphAlignment.END)       templateAlignStr = 'END';
+    else if (_ta === SlidesApp.ParagraphAlignment.JUSTIFIED) templateAlignStr = 'JUSTIFIED';
+    else if (_ta)                                            templateAlignStr = 'START';
+  } catch(e) {}
 
   // Helper: create the next content slide from the template.
   function nextSlide_() {
@@ -379,6 +407,82 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
     }
   }
 
+  // Collect REST requests so font size, alignment, and TEXT_AUTOFIT are applied
+  // atomically in one batch — avoids race between GAS setText and REST autofit.
+  var restRequests = [];
+  function queueSlideStyle_(boxId, fontSizePt) {
+    if (fontSizePt) {
+      restRequests.push({
+        updateTextStyle: {
+          objectId: boxId,
+          style: { fontSize: { magnitude: fontSizePt, unit: 'PT' } },
+          textRange: { type: 'ALL' },
+          fields: 'fontSize'
+        }
+      });
+    }
+    if (templateAlignStr) {
+      restRequests.push({
+        updateParagraphStyle: {
+          objectId: boxId,
+          style: { alignment: templateAlignStr },
+          textRange: { type: 'ALL' },
+          fields: 'alignment'
+        }
+      });
+    }
+    restRequests.push({
+      updateShapeProperties: {
+        objectId: boxId,
+        shapeProperties: { autofit: { autofitType: 'TEXT_AUTOFIT' } },
+        fields: 'autofit'
+      }
+    });
+  }
+
+  // Read template notes style so scripture slides can be blanked but keep the same look.
+  var templateNotesStyle = null;
+  if (isScripture) {
+    try {
+      var _ns = templateSlide.getNotesPage().getSpeakerNotesShape();
+      var _nts = _ns.getText().getTextStyle();
+      var _nps = _ns.getText().getParagraphStyle();
+      var _na = _nps.getParagraphAlignment();
+      var _naStr = null;
+      if      (_na === SlidesApp.ParagraphAlignment.CENTER)    _naStr = 'CENTER';
+      else if (_na === SlidesApp.ParagraphAlignment.END)       _naStr = 'END';
+      else if (_na === SlidesApp.ParagraphAlignment.JUSTIFIED) _naStr = 'JUSTIFIED';
+      else if (_na)                                            _naStr = 'START';
+      templateNotesStyle = {
+        fontSize: _nts.getFontSize(),
+        bold:     _nts.isBold(),
+        italic:   _nts.isItalic(),
+        align:    _naStr
+      };
+    } catch(e) {}
+  }
+
+  // Blanks a scripture slide's notes to a single space (invisible) styled to match the template.
+  function blankNotes_(slide) {
+    try {
+      var n = slide.getNotesPage().getSpeakerNotesShape();
+      n.getText().setText(' ');
+      if (templateNotesStyle) {
+        var ts = n.getText().getTextStyle();
+        try { if (templateNotesStyle.fontSize) ts.setFontSize(templateNotesStyle.fontSize); } catch(e2) {}
+        try { ts.setBold(!!templateNotesStyle.bold);   } catch(e2) {}
+        try { ts.setItalic(!!templateNotesStyle.italic); } catch(e2) {}
+        if (templateNotesStyle.align) {
+          try {
+            n.getText().getParagraphStyle().setParagraphAlignment(
+              SlidesApp.ParagraphAlignment[templateNotesStyle.align]
+            );
+          } catch(e2) {}
+        }
+      }
+    } catch(e) {}
+  }
+
   let created = 0;
 
   // Multi-slide: reference-only citation slide first
@@ -386,11 +490,10 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
     const refSlide = nextSlide_();
     const box = findContentBox_(refSlide);
     if (box) {
-      const textRange = box.getText();
-      textRange.setText(citation.replace(/^--\s*/, ''));
-      if (templateFontSize) textRange.getTextStyle().setFontSize(templateFontSize * 1.7);
+      box.getText().setText(citation.replace(/^--\s*/, ''));
+      queueSlideStyle_(box.getObjectId(), templateFontSize ? templateFontSize * 1.7 : null);
     }
-    clearSectionMarkers_(refSlide);
+    blankNotes_(refSlide);
     created++;
   }
 
@@ -402,8 +505,8 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
       if (isScripture) {
         const bodyText = batches[i].join('\n');
         box.getText().setText(bodyText);
-        if (templateFontSize && bodyText) box.getText().getTextStyle().setFontSize(templateFontSize);
-        clearSectionMarkers_(newSlide);
+        if (bodyText) queueSlideStyle_(box.getObjectId(), templateFontSize);
+        blankNotes_(newSlide);
       } else {
         // Lyrics: body gets lyric lines only; notes get full chord+lyric text
         const lyricOnly = batches[i]
@@ -416,7 +519,7 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
           continue;
         }
         box.getText().setText(bodyText);
-        if (templateFontSize) box.getText().getTextStyle().setFontSize(templateFontSize);
+        queueSlideStyle_(box.getObjectId(), templateFontSize);
         try {
           newSlide.getNotesPage().getSpeakerNotesShape().getText()
             .setText(chordFormat === 'inline' ? batches[i].join('\n') : convertInlineChordsForNotes_(batches[i]).join('\n'));
@@ -425,6 +528,15 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
       }
     }
     created++;
+  }
+
+  // Apply font size, alignment, and TEXT_AUTOFIT together in one REST batch.
+  if (restRequests.length > 0) {
+    try {
+      Slides.Presentations.batchUpdate({ requests: restRequests }, pres.getId());
+    } catch(e) {
+      Logger.log('Style batchUpdate error: ' + e.toString());
+    }
   }
 
   return created;

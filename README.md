@@ -27,8 +27,9 @@ Before creating slides you need a **template slide** — a slide you design once
 
 Design your template slide with:
 - The **background** you want (photo, solid color, gradient, etc.)
-- The **font, size, and color** for the lyric/scripture text
+- The **font, size, and color** for the lyric/scripture display
 - A **text box** sized and positioned where you want the words to appear
+- A **typical note** with the font, size and color for the presenter's notes, which for songs will contain the lyrics and chords
 
 Navigate to that slide in your presentation, **then** open the sidebar from the ChurchSlidesMaker menu. The sidebar captures the current slide as the template at the moment it opens — every slide created in that session will be a copy of it, inheriting its background, font, and text size.
 
