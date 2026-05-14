@@ -18,7 +18,6 @@ function onOpen(e) {
     .createMenu('ChurchSlidesMaker')
     .addItem('Open ChurchSlidesMaker', 'showSidebar')
     .addToUi();
-  showSidebar();
 }
 
 function onInstall(e) {
@@ -209,8 +208,13 @@ function getDriveSongsList(folderPath) {
 function insertDriveSlides(fileId) {
   var src  = SlidesApp.openById(fileId);
   var dest = SlidesApp.getActivePresentation();
+  var section = findSectionMarker_(dest, '<<songs section>>');
+  var insertAt = section ? findSectionEnd_(dest, section.index) : dest.getSlides().length;
   var count = 0;
-  src.getSlides().forEach(function(slide) { dest.appendSlide(slide); count++; });
+  src.getSlides().forEach(function(slide) {
+    dest.insertSlide(insertAt + count, slide);
+    count++;
+  });
   return count;
 }
 
