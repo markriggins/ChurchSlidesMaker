@@ -779,29 +779,30 @@ function normalizeSlides(fromSlide, toSlide) {
 
   const srcSlide = allSlides[start];
   const srcBox   = findAnyTextShape_(srcSlide);
-  if (!srcBox) throw new Error('The first slide uses Word Art or has no text box — select a text box slide as the starting slide.');
 
-  const srcTextStyle = srcBox.getText().getTextStyle();
-  const srcParaStyle = srcBox.getText().getParagraphStyle();
-
-  // Collect source style values (may be null if not explicitly set)
-  const fontFamily = srcTextStyle.getFontFamily();
-  const fontSize   = srcTextStyle.getFontSize();
-  const bold       = srcTextStyle.isBold();
-  const italic     = srcTextStyle.isItalic();
-  const alignment  = srcParaStyle.getParagraphAlignment();
-
-  // Foreground color — extract as RGB if available
+  var fontFamily = null, fontSize = null, bold = null, italic = null, alignment = null;
   var fgRed = null, fgGreen = null, fgBlue = null;
-  try {
-    const fg = srcTextStyle.getForegroundColor();
-    if (fg) { const rgb = fg.asRgbColor(); fgRed = rgb.getRed(); fgGreen = rgb.getGreen(); fgBlue = rgb.getBlue(); }
-  } catch(e) {}
+  if (srcBox) {
+    const srcTextStyle = srcBox.getText().getTextStyle();
+    const srcParaStyle = srcBox.getText().getParagraphStyle();
+    fontFamily = srcTextStyle.getFontFamily();
+    fontSize   = srcTextStyle.getFontSize();
+    bold       = srcTextStyle.isBold();
+    italic     = srcTextStyle.isItalic();
+    alignment  = srcParaStyle.getParagraphAlignment();
+    try {
+      const fg = srcTextStyle.getForegroundColor();
+      if (fg) { const rgb = fg.asRgbColor(); fgRed = rgb.getRed(); fgGreen = rgb.getGreen(); fgBlue = rgb.getBlue(); }
+    } catch(e) {}
+  }
+
+  // Copy background to all target slides, including Word Art slides.
+  copyBackground_(pres, srcSlide, allSlides, start, end);
 
   let count = 0;
   for (let i = start + 1; i < end; i++) {
     const slide  = allSlides[i];
-    // Skip slides that use Word Art — leave their styling untouched
+    // Skip text-style normalization for Word Art slides — background already copied above.
     if (slide.getShapes().length === 0 && slide.getPageElements().length > 0) continue;
     const shapes = slide.getShapes();
 
@@ -827,8 +828,8 @@ function normalizeSlides(fromSlide, toSlide) {
     count++;
   }
 
-  // Copy drop shadow via REST API
-  copyShadow_(pres, srcBox, allSlides, start, end);
+  // Copy drop shadow via REST API (only if source has a text box)
+  if (srcBox) copyShadow_(pres, srcBox, allSlides, start, end);
 
   return count;
 }
@@ -858,6 +859,33 @@ function copyShadow_(pres, srcBox, allSlides, start, end) {
     const box = findAnyTextShape_(allSlides[i]);
     if (!box) continue;
     requests.push({ updateShapeProperties: { objectId: box.getObjectId(), shapeProperties: { shadow: srcShadow }, fields: 'shadow' } });
+  }
+  if (requests.length) Slides.Presentations.batchUpdate({ requests: requests }, presId);
+}
+
+function copyBackground_(pres, srcSlide, allSlides, start, end) {
+  const presId = pres.getId();
+  const data = Slides.Presentations.get(presId, {
+    fields: 'slides(objectId,pageProperties/pageBackgroundFill)'
+  });
+
+  var srcBg = null;
+  const srcId = srcSlide.getObjectId();
+  (data.slides || []).forEach(function(sd) {
+    if (sd.objectId === srcId && sd.pageProperties && sd.pageProperties.pageBackgroundFill)
+      srcBg = sd.pageProperties.pageBackgroundFill;
+  });
+  if (!srcBg) return;
+
+  const requests = [];
+  for (let i = start + 1; i < end; i++) {
+    requests.push({
+      updatePageProperties: {
+        objectId: allSlides[i].getObjectId(),
+        pageProperties: { pageBackgroundFill: srcBg },
+        fields: 'pageBackgroundFill'
+      }
+    });
   }
   if (requests.length) Slides.Presentations.batchUpdate({ requests: requests }, presId);
 }
