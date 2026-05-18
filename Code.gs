@@ -206,13 +206,32 @@ function getDriveSongsList(folderPath) {
 
 // Appends all slides from a Drive presentation into the active presentation.
 function insertDriveSlides(fileId) {
-  var src  = SlidesApp.openById(fileId);
-  var dest = SlidesApp.getActivePresentation();
-  var section = findSectionMarker_(dest, '<<songs section>>');
-  var insertAt = section ? findSectionEnd_(dest, section.index) : dest.getSlides().length;
+  var src    = SlidesApp.openById(fileId);
+  var dest   = SlidesApp.getActivePresentation();
+  var slides = dest.getSlides();
+
+  var section      = findSectionMarker_(dest, '<<songs section>>');
+  var sectionStart = section ? section.index : -1;
+  var sectionEnd   = section ? findSectionEnd_(dest, sectionStart) : slides.length;
+
+  // If the currently selected slide is inside the songs section, insert after it.
+  var insertAt = sectionEnd;
+  try {
+    var curId = dest.getSelection().getCurrentPage().getObjectId();
+    for (var i = 0; i < slides.length; i++) {
+      if (slides[i].getObjectId() === curId && i >= sectionStart && i < sectionEnd) {
+        insertAt = i + 1;
+        break;
+      }
+    }
+  } catch(e) {}
+
   var count = 0;
   src.getSlides().forEach(function(slide) {
     dest.insertSlide(insertAt + count, slide);
+    // Strip any <<section markers>> the source slide may have in its notes
+    // (e.g. if the source presentation used that slide as a template).
+    clearSectionMarkers_(dest.getSlides()[insertAt + count]);
     count++;
   });
   return count;
@@ -796,8 +815,9 @@ function normalizeSlides(fromSlide, toSlide) {
     } catch(e) {}
   }
 
-  // Copy background to all target slides, including Word Art slides.
+  // Copy background fill and any full-slide background image to all target slides.
   copyBackground_(pres, srcSlide, allSlides, start, end);
+  copyBackgroundImage_(pres, srcSlide, allSlides, start, end);
 
   let count = 0;
   for (let i = start + 1; i < end; i++) {
@@ -888,6 +908,67 @@ function copyBackground_(pres, srcSlide, allSlides, start, end) {
     });
   }
   if (requests.length) Slides.Presentations.batchUpdate({ requests: requests }, presId);
+}
+
+// Returns the rear-most page element if it is an image that covers the full slide, else null.
+// GAS returns getPageElements() ordered back-to-front, so index 0 is the rear-most.
+function findFullSlideImage_(slide, presWidth, presHeight) {
+  var elements = slide.getPageElements();
+  if (!elements.length) return null;
+  var el = elements[0];
+  if (el.getPageElementType() !== SlidesApp.PageElementType.IMAGE) return null;
+  var tol = 5;
+  if (Math.abs(el.getLeft())             <= tol &&
+      Math.abs(el.getTop())              <= tol &&
+      Math.abs(el.getWidth()  - presWidth)  <= tol &&
+      Math.abs(el.getHeight() - presHeight) <= tol) return el;
+  return null;
+}
+
+function copyBackgroundImage_(pres, srcSlide, allSlides, start, end) {
+  var presWidth  = pres.getPageWidth();
+  var presHeight = pres.getPageHeight();
+  var presId     = pres.getId();
+
+  var srcEl = findFullSlideImage_(srcSlide, presWidth, presHeight);
+  if (!srcEl) return;
+
+  // Read transparency from REST API (GAS Image has no transparency getter).
+  var srcObjId = srcEl.getObjectId();
+  var restData = Slides.Presentations.get(presId, {
+    fields: 'slides(pageElements(objectId,image/imageProperties/transparency))'
+  });
+  var transparency = 0;
+  (restData.slides || []).forEach(function(sd) {
+    (sd.pageElements || []).forEach(function(el) {
+      if (el.objectId === srcObjId && el.image && el.image.imageProperties)
+        transparency = el.image.imageProperties.transparency || 0;
+    });
+  });
+
+  var blob = srcEl.asImage().getBlob();
+  var newIds = [];
+
+  for (var i = start + 1; i < end; i++) {
+    var slide = allSlides[i];
+    var existing = findFullSlideImage_(slide, presWidth, presHeight);
+    if (existing) existing.remove();
+    var img = slide.insertImage(blob);
+    img.setLeft(0);
+    img.setTop(0);
+    img.setWidth(presWidth);
+    img.setHeight(presHeight);
+    img.sendToBack();
+    newIds.push(img.getObjectId());
+  }
+
+  // Apply transparency via REST API.
+  if (transparency > 0 && newIds.length) {
+    var requests = newIds.map(function(id) {
+      return { updateImageProperties: { objectId: id, imageProperties: { transparency: transparency }, fields: 'transparency' } };
+    });
+    Slides.Presentations.batchUpdate({ requests: requests }, presId);
+  }
 }
 
 // ─── Transpose selected slides' speaker notes ─────────────────────────────────

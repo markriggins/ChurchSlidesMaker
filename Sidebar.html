@@ -143,6 +143,8 @@
       <select id="songSource" onchange="onSongSourceChange()" style="flex:1;min-width:0">
         <option value="all">All Sources</option>
         <option value="github:mattgraham/worship">GitHub: mattgraham/worship</option>
+        <option value="github:MarceloRemeseiro/open-worship-songs/tree/main/en/hymns">GitHub: MarceloRemeseiro/open-worship-songs (hymns)</option>
+        <option value="github:MarceloRemeseiro/open-worship-songs/tree/main/en/popular">GitHub: MarceloRemeseiro/open-worship-songs (popular)</option>
         <option value="drive">Google Drive: EasternGate/Songs</option>
         <option value="github:custom">GitHub: custom…</option>
         <option value="drive:custom">Google Drive: custom…</option>
@@ -687,7 +689,9 @@ function toggleSongSection(head) {
 }
 
 // Values that cannot be deleted by the user.
-var NON_DELETABLE = {'all':1,'github:mattgraham/worship':1,'drive':1,'github:custom':1,'drive:custom':1};
+var NON_DELETABLE = {'all':1,'github:mattgraham/worship':1,'github:MarceloRemeseiro/open-worship-songs/tree/main/en/hymns':1,'github:MarceloRemeseiro/open-worship-songs/tree/main/en/popular':1,'drive':1,'github:custom':1,'drive:custom':1};
+// Placeholder options that aren't real sources — excluded from All Sources search.
+var META_OPTIONS = {'all':1,'github:custom':1,'drive:custom':1};
 
 function getSongSource() {
   var src = document.getElementById('songSource').value;
@@ -789,7 +793,7 @@ function getAllSourceConfigs() {
   var configs = [];
   for (var i = 0; i < select.options.length; i++) {
     var opt = select.options[i];
-    if (NON_DELETABLE[opt.value]) continue;
+    if (META_OPTIONS[opt.value]) continue;
     configs.push({ value: opt.value, label: opt.text });
   }
   return configs;
