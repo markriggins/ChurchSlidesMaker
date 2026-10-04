@@ -26,25 +26,29 @@ Slides are created by duplicating a template slide you design, so they automatic
 
 ## Usage
 
-### Choosing a template slide
+### Formatting Template Slides
 
-Before creating slides you need a **template slide** — a slide you design once that all generated slides will be copied from. It must contain at least one text box, which is where the lyrics or scripture text will be placed.
+ChurchSlidesMaker uses **two template slides** — one for song lyrics and one for scripture passages.
 
-Design your template slide with:
+<img src="assets/TemplateForScriptures.png" align="right" width="400" hspace="20">
+
+Each is a slide you design once; all generated slides of that type are copied from it, automatically inheriting its background, fonts, colors, and layout.
+
+You'll typically want different designs for songs and scripture — for example, a dark background with large white text for lyrics, and a lighter or textured background for scripture with a smaller reference font. Creating separate templates lets each section look exactly right without compromise.
+
+Design each template slide with:
 
 - The **background** you want (photo, solid color, gradient, etc.)
 - The **font, size, and color** for the lyric/scripture text
 - A **text box** sized and positioned where you want the words to appear
-- A **note** with the font, size, and style you want for the presenter's notes (for song slides, the notes will contain the full lyrics and chords)
+- A **note** with the font, size, and style you want for the presenter's notes (song slides show full chord+lyric text in the notes; scripture slides leave the notes blank but styled to match)
 
-Then add a marker to the slide's **speaker notes** so ChurchSlidesMaker knows which slide is the template:
+Mark each template by adding a tag to its **speaker notes**:
 
 - `<<songs section>>` — marks the template for song slides
 - `<<scriptures>>` — marks the template for scripture slides
 
-Navigate to that slide in your presentation, **then** open the sidebar from the ChurchSlidesMaker menu. New song slides are appended to the end of the songs section, and new scripture slides are appended to the end of the scriptures section — so your presentation stays organized automatically.
-
-> **Tip:** You can have both markers in the same presentation — one slide for songs, one for scripture — each with its own background and font style.
+New song slides are appended to the end of the songs section, and new scripture slides are appended to the end of the scriptures section — so your presentation stays organized automatically as you build it.
 
 ---
 
@@ -63,10 +67,9 @@ Select **All Sources** at the top of the source dropdown to search for songs acr
 
 Clicking on the All Sources dropdown lists all the configured sources, allowing you to choose an individual source.![ChoosingASource.png](assets/ChoosingASource.png?t=1778680239101)
 
-
 ##### Adding a new Source
 
-If you select "GitHub: Custom ..." then you can add a Github repo as a source by entering either a Github URL or repo name. Selecting 
+If you select "GitHub: Custom ..." then you can add a Github repo as a source by entering either a Github URL or repo name. Selecting
 All sources are stored privately in your own browser local storage.
 
 #### Loading a song

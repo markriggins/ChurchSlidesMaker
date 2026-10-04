@@ -1,6 +1,11 @@
 index.html
 README.md
 README.txt
+MEMORY.md
+CLAUDE.md
+TODO.txt
 .idea/
 .gitignore
 node_modules/**
+scripts/**
+assets/**

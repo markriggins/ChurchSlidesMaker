@@ -1,11 +1,10 @@
 // ── ChurchSlidesMaker — Google Apps Script ────────────────────────────────────
 //
-// SETUP:
-//   1. Extensions > Apps Script in your Google Slides presentation
-//   2. Rename the default "Code.gs" file (or replace its contents with this file)
-//   3. Add a new HTML file named exactly "Sidebar" and paste Sidebar.html into it
-//   4. Save both files (Ctrl+S), close the editor, reload the presentation
-//   5. A "ChurchSlidesMaker" menu will appear — click "Open ChurchSlidesMaker" to open the panel
+// SETUP (Slides add-on — authorize once, works on copies):
+//   1. clasp push to the standalone Apps Script project (see .clasp.json)
+//   2. In the script editor: Deploy > Test deployments > Install > Done
+//   3. Reload any Google Slides file; click the ChurchSlidesMaker icon in the right rail
+//   4. Open panel. Authorize when prompted. Copies of this deck keep that grant.
 //
 // The panel handles scripture lookup, chord/lyric wrapping, and slide creation.
 
@@ -17,6 +16,10 @@ function onOpen(e) {
   SlidesApp.getUi()
     .createMenu('ChurchSlidesMaker')
     .addItem('Open ChurchSlidesMaker', 'showSidebar')
+    .addItem('Reset', 'cleanupGeneratedSlides')
+    .addSeparator()
+    .addItem('Harvest song backgrounds', 'harvestSongBackgrounds')
+    .addItem('Harvest song backgrounds (force all)', 'harvestSongBackgroundsForce')
     .addToUi();
 }
 
@@ -552,7 +555,7 @@ function createVerseSlides(text, isScripture, linesPerSlide, chordFormat) {
         // Lyrics: body gets lyric lines only; notes get full chord+lyric text
         const lyricOnly = batches[i]
           .filter(function(l) { return !isChordLine_(l) && !isSectionLabel_(l); })
-          .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, ''); });
+          .map(function(l) { return l.replace(/\[[A-G][^\]]*\]/g, '').replace(/(\w) - (\w)/g, '$1$2').replace(/(\w)-(\w)/g, '$1$2'); });
         const bodyText = lyricOnly.join('\n');
         if (!bodyText.trim()) {
           newSlide.remove();
@@ -606,6 +609,49 @@ function findSectionEnd_(pres, startIdx) {
     } catch(e) {}
   }
   return slides.length;
+}
+
+// True if this is a template to keep: notes contain <<songs section>> or <<scriptures>>.
+function isTemplateSlide_(slide) {
+  try {
+    var notes = slide.getNotesPage().getSpeakerNotesShape().getText().asString().toLowerCase();
+    return notes.indexOf('<<songs section>>') >= 0 || notes.indexOf('<<scriptures>>') >= 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Reset: delete every slide that is not a song or scripture template. Confirm first.
+function cleanupGeneratedSlides() {
+  var pres = SlidesApp.getActivePresentation();
+  var slides = pres.getSlides();
+  var keepCount = 0;
+  var toRemove = [];
+  for (var i = 0; i < slides.length; i++) {
+    if (isTemplateSlide_(slides[i])) keepCount++;
+    else toRemove.push(slides[i]);
+  }
+  var ui = SlidesApp.getUi();
+  if (keepCount === 0) {
+    throw new Error('No <<songs section>> or <<scriptures>> template found. Nothing was deleted.');
+  }
+  if (toRemove.length === 0) {
+    ui.alert('Already at starting point — only template slides are in this deck.');
+    return { removed: 0, kept: keepCount, alreadyClean: true };
+  }
+  var resp = ui.alert(
+    'Reset',
+    'Remove ' + toRemove.length + ' slide(s)? Only the ' + keepCount +
+      ' template slide(s) tagged <<songs section>> or <<scriptures>> will remain.',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) {
+    return { removed: 0, kept: keepCount, cancelled: true };
+  }
+  for (var j = toRemove.length - 1; j >= 0; j--) {
+    toRemove[j].remove();
+  }
+  return { removed: toRemove.length, kept: keepCount };
 }
 
 // Removes <<marker>> tokens from a slide's speaker notes so it isn't treated as a section header.

@@ -1,3 +1,4 @@
 .clasp.json
+.clasp.bound.json
 .idea/
 node_modules/
