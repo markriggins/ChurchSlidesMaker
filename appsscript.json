@@ -22,7 +22,7 @@
   "addOns": {
     "common": {
       "name": "ChurchSlidesMaker",
-      "logoUrl": "https://raw.githubusercontent.com/markriggins/ChurchSlidesMaker/main/assets/addon-logo.png",
+      "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/library_music_black_48dp.png",
       "layoutProperties": {
         "primaryColor": "#5a9e6a",
         "secondaryColor": "#4a8e5a"
