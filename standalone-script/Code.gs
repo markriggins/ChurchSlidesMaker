@@ -281,7 +281,13 @@ function insertScriptures(config) {
       throw new Error('passages[' + p + '].ref is required');
     }
     var ref = normalizeRef_(rawRef);
-    var fetched = fetchPassage_(ref, translation);
+    // Pre-fetched text (e.g. ESV fetched elsewhere) skips the network call,
+    // so no API key has to live in the script.
+    var passageTranslation = String(passage.translation || translation).toLowerCase();
+    var fetched = (passage.verses && passage.verses.length)
+      ? { verses: passage.verses.map(function (x) { return { verse: x.verse, text: x.text }; }),
+          displayRef: passage.displayRef || ref }
+      : fetchPassage_(ref, passageTranslation);
     var verses = fetched.verses;
     if (heHim) {
       for (var v = 0; v < verses.length; v++) {
