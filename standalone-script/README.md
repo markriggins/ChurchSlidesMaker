@@ -1,6 +1,8 @@
 # Eastern Gate slide-insert script
 
-Standalone Google Apps Script that inserts song-file slides and builds scripture slides for an Eastern Gate service deck. It is **not** part of ChurchSlidesMaker and must not be pasted into that add-on. It never deletes or reorders existing slides, never modifies `<<...>>` marker slides (it only reads them to find a section or to copy the scripture layout), and never runs Reset.
+Standalone Google Apps Script that inserts song-file slides and builds scripture slides for an Eastern Gate service deck. It is **not** part of ChurchSlidesMaker and must not be pasted into that add-on. It never deletes or reorders existing slides, never modifies `<<songs section>>` / `<<scriptures>>` marker slides (it only reads them to find a section or to copy the scripture layout), and never runs Reset.
+
+**Section markers.** The only markers recognized are slides whose speaker notes are exactly `<<songs section>>` or `<<scriptures>>` (case-insensitive), as the whole trimmed text or as the trimmed first non-blank line (the template's marker slides have a format hint on the next lines). Any other `<<...>>` text, such as `<<instructions>>` written in song notes, is ordinary text: never treated as a marker and never changed.
 
 ## Deploy (one-time)
 
@@ -38,7 +40,7 @@ To avoid editing code: call `setSongConfig(config)` once, then `runFromPropertie
 - Positional form: `insertSongsAt(targetDeckId, [{fileId, repeat}], insertAfterIndex)`; `insertAfterIndex` is the 0-based slide the songs follow (`-1` = top, `null` = end).
 - Test: select `testSongs` (in `TestSongs.gs`) and click Run. It appends To Him Who Sits on the Throne (once) and Every Praise x2 to the scratch deck `ZZ-TEST-song-copy-2026-11-15`, and refuses to run on the real 2026-11-15 deck.
 - All song entries are validated before anything is inserted. If a copy fails partway, nothing is deleted; the partial manifest is logged.
-- `applyNotesFormat` defaults to `false`. If `true`, the font and size from the `<<songs section>>` marker’s speaker notes (the lyric/chord format note) are applied to inserted slides’ notes. Marker text itself is never copied onto inserted notes. Source-file notes are copied as-is, including any `<<` the song file already had; those slides are listed in `notesContainingChevrons`.
+- `applyNotesFormat` defaults to `false`. If `true`, the font and size from the `<<songs section>>` marker’s speaker notes (the lyric/chord format note) are applied to inserted slides’ notes. Marker text itself is never copied onto inserted notes. Source-file notes are copied as-is, including any `<<instructions>>` the song file has; the manifest only counts them in `notesWithChevronsCount`, and the log shows one info line.
 
 ### Example: 2026-11-15 deck
 
@@ -85,4 +87,4 @@ Call `insertScriptures(config)` or `runInsertScriptures(config)`. Or `setScriptu
 
 ## Return value
 
-Both insert functions log and return a manifest of each new slide’s index, objectId, and source (song title and copy number, or scripture ref and role). Song manifests also list any inserted notes that contain `<<`.
+Both insert functions log and return a manifest of each new slide’s index, objectId, and source (song title and copy number, or scripture ref and role).

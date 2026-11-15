@@ -1,15 +1,49 @@
 /**
  * Standalone helper for Eastern Gate service decks: insert song slides and
  * build scripture slides. Not part of ChurchSlidesMaker. Never runs Reset.
- * Never deletes or reorders existing slides. Never modifies slides whose
- * notes contain <<...>> markers, except to read them when locating a
- * section or to copy the scriptures template's look onto new slides.
+ * Never deletes or reorders existing slides.
+ *
+ * Section markers: the ONLY markers recognized are slides whose speaker
+ * notes are exactly <<songs section>> or <<scriptures>> (case-insensitive),
+ * either as the whole trimmed text or as the trimmed first non-blank line
+ * (the template's marker slides carry a format hint on the lines below). Any other <<...>> text, such as Mark's <<instructions>>
+ * inside song notes, is ordinary note text: never treated as a marker and
+ * never changed. Marker slides are only read (to locate a section or to copy
+ * the scriptures template's look), never modified.
  */
 
-var SONGS_SECTION_RE = /<<\s*songs section\s*>>/i;
-var SCRIPTURES_SECTION_RE = /<<\s*scriptures\s*>>/i;
-var SECTION_MARKER_RE = /<<[^>]+>>/;
+// Anchored: matched against one whole trimmed line, never a substring.
+var SONGS_SECTION_RE = /^<<\s*songs section\s*>>$/i;
+var SCRIPTURES_SECTION_RE = /^<<\s*scriptures\s*>>$/i;
+// Used only to keep bot-written scripture notes free of <<...>>; never used
+// to detect section markers.
+var GENERATED_CHEVRON_RE = /<<[^>]*>>/;
 var CHEVRON_RE = /<</;
+
+// The marker line: the trimmed first non-blank line of the notes. When the
+// notes are a single line this is the whole trimmed text.
+function markerLine_(notes) {
+  var lines = String(notes || '').split(/\r?\n|\r|\u000b/);
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (line) {
+      return line;
+    }
+  }
+  return '';
+}
+
+function isSongsMarkerNotes_(notes) {
+  return SONGS_SECTION_RE.test(markerLine_(notes));
+}
+
+function isScripturesMarkerNotes_(notes) {
+  return SCRIPTURES_SECTION_RE.test(markerLine_(notes));
+}
+
+function isSectionMarkerNotes_(notes) {
+  return isSongsMarkerNotes_(notes) || isScripturesMarkerNotes_(notes);
+}
 
 var ZZ_TEMPLATE_ID = '1mdlmL7xdlQBAvHKc1H7tyIBYSuW1gcv6BKBh5Q6TysQ';
 var ZZ_SCRIPTURE_SLIDE_ID = 'SLIDES_API1704141085_0';
@@ -28,8 +62,8 @@ var LINES_PER_SLIDE = 5;
  * SlidesApp insertSlide (slide content, background, layout, and speaker
  * notes/chords come along). Never deletes, reorders, or edits existing
  * slides, and never writes any <<...>> text of its own. Song-file notes are
- * copied as-is; any that already contain << are listed in
- * notesContainingChevrons so they can be reviewed.
+ * copied as-is, including any <<instructions>> Mark wrote in them; those are
+ * never treated as section markers (only counted in notesWithChevronsCount).
  *
  * @param {Object} config
  * @param {string} config.targetId - Service deck ID.
@@ -108,7 +142,7 @@ function insertSongs(config) {
     applyNotesFormat: applyNotesFormat,
     songs: [],
     inserted: [],
-    notesContainingChevrons: []
+    notesWithChevronsCount: 0
   };
 
   var cursor = insertAt;
@@ -166,14 +200,7 @@ function insertSongs(config) {
           };
           var notesNow = getNotesText(inserted);
           if (CHEVRON_RE.test(notesNow)) {
-            entry.notesContainChevrons = true;
-            manifest.notesContainingChevrons.push({
-              index: cursor,
-              objectId: entry.objectId,
-              sourceTitle: sourceTitle,
-              copyNumber: r,
-              preview: notesNow.substring(0, 120)
-            });
+            manifest.notesWithChevronsCount++;
           }
           manifest.inserted.push(entry);
           songSummary.lastIndex = cursor;
@@ -230,9 +257,9 @@ function songManifestSummary_(manifest) {
         ' x ' + sg.slidesPerCopy + ' slide(s) at slides ' + (sg.firstIndex + 1) +
         '-' + (sg.lastIndex + 1) + (sg.note ? ' (' + sg.note + ')' : ''));
   }
-  if (manifest.notesContainingChevrons.length) {
-    lines.push('  Note: ' + manifest.notesContainingChevrons.length +
-        ' inserted slide(s) carry << in notes copied from the song file.');
+  if (manifest.notesWithChevronsCount) {
+    lines.push('  (info: ' + manifest.notesWithChevronsCount +
+        ' slide(s) kept <<instructions>> from the song notes, unchanged)');
   }
   return lines.join('\n');
 }
@@ -302,11 +329,11 @@ function findSongsMarker(slides) {
   for (var i = 0; i < slides.length; i++) {
     var notes = getNotesText(slides[i]);
     if (songsMarkerIndex === -1) {
-      if (SONGS_SECTION_RE.test(notes)) {
+      if (isSongsMarkerNotes_(notes)) {
         songsMarkerIndex = i;
         songBlockEnd = i + 1;
       }
-    } else if (SECTION_MARKER_RE.test(notes)) {
+    } else if (isSectionMarkerNotes_(notes)) {
       songBlockEnd = i;
       break;
     } else {
@@ -505,7 +532,7 @@ function resolveScriptureInsertAt_(insertAt, slideCount) {
 function getScriptureTemplateSlide_(target) {
   var slides = target.getSlides();
   for (var i = 0; i < slides.length; i++) {
-    if (SCRIPTURES_SECTION_RE.test(getNotesText(slides[i]))) {
+    if (isScripturesMarkerNotes_(getNotesText(slides[i]))) {
       return { slide: slides[i], source: 'target' };
     }
   }
@@ -517,7 +544,7 @@ function getScriptureTemplateSlide_(target) {
     }
   }
   for (var k = 0; k < zzSlides.length; k++) {
-    if (SCRIPTURES_SECTION_RE.test(getNotesText(zzSlides[k]))) {
+    if (isScripturesMarkerNotes_(getNotesText(zzSlides[k]))) {
       return { slide: zzSlides[k], source: 'zz_template' };
     }
   }
@@ -636,7 +663,7 @@ function scriptureNotesToApply_(notes) {
     return { ok: true, text: '' };
   }
   var text = String(notes);
-  if (SECTION_MARKER_RE.test(text)) {
+  if (GENERATED_CHEVRON_RE.test(text)) {
     return { skipped: true, reason: 'notes contain a <<...>> marker and were not applied' };
   }
   return { ok: true, text: text };
