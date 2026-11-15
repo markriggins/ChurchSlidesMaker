@@ -24,16 +24,29 @@ var LINES_PER_SLIDE = 5;
 /**
  * Insert song slides into a service deck.
  *
+ * Copies every slide of each song file, in order, into the target with
+ * SlidesApp insertSlide (slide content, background, layout, and speaker
+ * notes/chords come along). Never deletes, reorders, or edits existing
+ * slides, and never writes any <<...>> text of its own. Song-file notes are
+ * copied as-is; any that already contain << are listed in
+ * notesContainingChevrons so they can be reviewed.
+ *
  * @param {Object} config
  * @param {string} config.targetId - Service deck ID.
- * @param {number|null} [config.insertAt] - 0-based insert index. If null or
- *     omitted, inserts after the last song slide following the
- *     <<songs section>> marker (or right after the marker if there are none).
- *     insertAt is required when the target has no <<songs section>> marker.
- * @param {Array<{sourceId: string, repeat?: number}>} config.songs
+ * @param {number|string|null} [config.insertAt] - 0-based insert index, or
+ *     'end' (or -1) to append at the end of the deck. If null or omitted,
+ *     inserts after the last song slide following the <<songs section>>
+ *     marker (or right after the marker if there are none). insertAt is
+ *     required when the target has no <<songs section>> marker.
+ * @param {Array<{sourceId?: string, fileId?: string, repeat?: number}>} config.songs
+ *     In locked order. fileId is accepted as an alias for sourceId. repeat
+ *     (default 1) inserts the whole song that many times back to back. A song
+ *     whose file has only one slide is never repeated: repeat is ignored.
  * @param {boolean} [config.applyNotesFormat=false] - If true, apply the
  *     lyric/chord font and size from the <<songs section>> marker's speaker
  *     notes to each inserted slide's notes. Default false.
+ * @param {string} [config.linkingMode='NOT_LINKED'] - 'NOT_LINKED' (plain
+ *     copy, default) or 'LINKED' (copy stays linked to the song file).
  * @return {Object} Manifest of inserted slides.
  */
 function insertSongs(config) {
@@ -47,10 +60,36 @@ function insertSongs(config) {
     throw new Error('config.songs must be a non-empty array');
   }
 
+  var linkingName = String(config.linkingMode || 'NOT_LINKED').toUpperCase();
+  if (linkingName !== 'NOT_LINKED' && linkingName !== 'LINKED') {
+    throw new Error('config.linkingMode must be NOT_LINKED or LINKED');
+  }
+  var linkingMode = SlidesApp.SlideLinkingMode[linkingName];
+
+  // Validate every song entry before touching the target, so a bad entry
+  // cannot leave a half-inserted deck.
+  var plan = [];
+  for (var v = 0; v < songs.length; v++) {
+    var entryIn = songs[v] || {};
+    var sid = entryIn.sourceId || entryIn.fileId;
+    if (!sid) {
+      throw new Error('songs[' + v + '].sourceId (or fileId) is required');
+    }
+    var rep = entryIn.repeat == null ? 1 : entryIn.repeat;
+    if (typeof rep !== 'number' || rep < 1 || rep !== Math.floor(rep)) {
+      throw new Error('songs[' + v + '].repeat must be a positive integer (got ' + entryIn.repeat + ')');
+    }
+    if (sid === targetId) {
+      throw new Error('songs[' + v + '].sourceId must not be the target deck');
+    }
+    plan.push({ sourceId: sid, repeat: rep });
+  }
+
   var applyNotesFormat = config.applyNotesFormat === true;
   var target = SlidesApp.openById(targetId);
   var targetTitle = target.getName();
   var slides = target.getSlides();
+  var slideCountBefore = slides.length;
 
   var markerInfo = findSongsMarker(slides);
   var notesFormat = null;
@@ -63,76 +102,139 @@ function insertSongs(config) {
   var manifest = {
     targetId: targetId,
     targetTitle: targetTitle,
+    slideCountBefore: slideCountBefore,
     insertAt: insertAt,
+    linkingMode: linkingName,
     applyNotesFormat: applyNotesFormat,
+    songs: [],
     inserted: [],
     notesContainingChevrons: []
   };
 
   var cursor = insertAt;
 
-  for (var s = 0; s < songs.length; s++) {
-    var song = songs[s] || {};
-    var sourceId = song.sourceId;
-    if (!sourceId) {
-      throw new Error('songs[' + s + '].sourceId is required');
-    }
-    var repeat = song.repeat == null ? 1 : song.repeat;
-    if (typeof repeat !== 'number' || repeat < 1 || repeat !== Math.floor(repeat)) {
-      throw new Error('songs[' + s + '].repeat must be a positive integer (got ' + song.repeat + ')');
-    }
-    if (sourceId === targetId) {
-      throw new Error('songs[' + s + '].sourceId must not be the target deck');
-    }
+  try {
+    for (var s = 0; s < plan.length; s++) {
+      var sourceId = plan[s].sourceId;
+      var source = SlidesApp.openById(sourceId);
+      var sourceTitle = source.getName();
+      var sourceSlides = source.getSlides();
+      if (!sourceSlides.length) {
+        throw new Error('Song file ' + sourceTitle + ' (' + sourceId + ') has no slides');
+      }
+      // Mark's rule: a one-slide song is never repeated.
+      var repeat = sourceSlides.length === 1 ? 1 : plan[s].repeat;
 
-    var source = SlidesApp.openById(sourceId);
-    var sourceTitle = source.getName();
-    var sourceSlides = source.getSlides();
+      var songSummary = {
+        order: s + 1,
+        sourceId: sourceId,
+        sourceTitle: sourceTitle,
+        slidesPerCopy: sourceSlides.length,
+        repeatRequested: plan[s].repeat,
+        copiesInserted: 0,
+        firstIndex: cursor,
+        lastIndex: null
+      };
+      if (repeat !== plan[s].repeat) {
+        songSummary.note = 'one-slide song: repeat ignored, inserted once';
+      }
+      manifest.songs.push(songSummary);
 
-    for (var r = 1; r <= repeat; r++) {
-      for (var i = 0; i < sourceSlides.length; i++) {
-        var sourceSlide = sourceSlides[i];
-        var sourceNotes = getNotesText(sourceSlide);
-        var inserted = target.insertSlide(
-          cursor,
-          sourceSlide,
-          SlidesApp.SlideLinkingMode.NOT_LINKED
-        );
-        var insertedNotes = getNotesText(inserted);
-        if (insertedNotes !== sourceNotes) {
-          setNotesText(inserted, sourceNotes);
-        }
-        if (notesFormat) {
-          applyNotesFormatToSlide(inserted, notesFormat);
-        }
+      for (var r = 1; r <= repeat; r++) {
+        for (var i = 0; i < sourceSlides.length; i++) {
+          var sourceSlide = sourceSlides[i];
+          var sourceNotes = getNotesText(sourceSlide);
+          var inserted = target.insertSlide(cursor, sourceSlide, linkingMode);
+          if (linkingName === 'NOT_LINKED') {
+            var insertedNotes = getNotesText(inserted);
+            if (insertedNotes !== sourceNotes) {
+              setNotesText(inserted, sourceNotes);
+            }
+            if (notesFormat) {
+              applyNotesFormatToSlide(inserted, notesFormat);
+            }
+          }
 
-        var entry = {
-          index: cursor,
-          objectId: inserted.getObjectId(),
-          sourceId: sourceId,
-          sourceTitle: sourceTitle,
-          sourceSlideIndex: i,
-          copyNumber: r
-        };
-        var notesNow = getNotesText(inserted);
-        if (CHEVRON_RE.test(notesNow)) {
-          entry.notesContainChevrons = true;
-          manifest.notesContainingChevrons.push({
+          var entry = {
             index: cursor,
-            objectId: entry.objectId,
+            slideNumber: cursor + 1,
+            objectId: inserted.getObjectId(),
+            sourceId: sourceId,
             sourceTitle: sourceTitle,
-            copyNumber: r,
-            preview: notesNow.substring(0, 120)
-          });
+            sourceSlideIndex: i,
+            copyNumber: r
+          };
+          var notesNow = getNotesText(inserted);
+          if (CHEVRON_RE.test(notesNow)) {
+            entry.notesContainChevrons = true;
+            manifest.notesContainingChevrons.push({
+              index: cursor,
+              objectId: entry.objectId,
+              sourceTitle: sourceTitle,
+              copyNumber: r,
+              preview: notesNow.substring(0, 120)
+            });
+          }
+          manifest.inserted.push(entry);
+          songSummary.lastIndex = cursor;
+          cursor++;
         }
-        manifest.inserted.push(entry);
-        cursor++;
+        songSummary.copiesInserted = r;
       }
     }
+  } catch (err) {
+    manifest.error = String(err && err.message ? err.message : err);
+    manifest.slideCountAfter = target.getSlides().length;
+    Logger.log('insertSongs FAILED partway; nothing was deleted. Partial manifest:\n' +
+        JSON.stringify(manifest, null, 2));
+    throw err;
   }
 
+  target.saveAndClose();
+  manifest.slideCountAfter = SlidesApp.openById(targetId).getSlides().length;
+  manifest.insertedCount = manifest.inserted.length;
+  Logger.log(songManifestSummary_(manifest));
   Logger.log(JSON.stringify(manifest, null, 2));
   return manifest;
+}
+
+/**
+ * Positional wrapper: insertSongsAt(targetDeckId, songs, insertAfterIndex).
+ * songs = [{fileId, repeat}] in locked order. insertAfterIndex is the
+ * 0-based index of the slide the songs should follow (-1 = very top);
+ * null/undefined = append at the end of the deck.
+ */
+function insertSongsAt(targetDeckId, songs, insertAfterIndex, options) {
+  var config = {};
+  options = options || {};
+  for (var k in options) {
+    if (Object.prototype.hasOwnProperty.call(options, k)) {
+      config[k] = options[k];
+    }
+  }
+  config.targetId = targetDeckId;
+  config.songs = songs;
+  config.insertAt = (insertAfterIndex === null || insertAfterIndex === undefined)
+      ? 'end'
+      : insertAfterIndex + 1;
+  return insertSongs(config);
+}
+
+function songManifestSummary_(manifest) {
+  var lines = ['Inserted ' + manifest.inserted.length + ' slide(s) into "' +
+      manifest.targetTitle + '" (' + manifest.slideCountBefore + ' -> ' +
+      manifest.slideCountAfter + ' slides):'];
+  for (var i = 0; i < manifest.songs.length; i++) {
+    var sg = manifest.songs[i];
+    lines.push('  ' + sg.order + '. ' + sg.sourceTitle + ': ' + sg.copiesInserted +
+        ' x ' + sg.slidesPerCopy + ' slide(s) at slides ' + (sg.firstIndex + 1) +
+        '-' + (sg.lastIndex + 1) + (sg.note ? ' (' + sg.note + ')' : ''));
+  }
+  if (manifest.notesContainingChevrons.length) {
+    lines.push('  Note: ' + manifest.notesContainingChevrons.length +
+        ' inserted slide(s) carry << in notes copied from the song file.');
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -169,6 +271,9 @@ function setSongConfig(config) {
 }
 
 function resolveSongInsertAt_(insertAt, slides, markerInfo) {
+  if (insertAt === 'end' || insertAt === -1) {
+    return slides.length;
+  }
   if (insertAt !== null && insertAt !== undefined && insertAt !== '') {
     if (typeof insertAt !== 'number' || insertAt < 0 || insertAt !== Math.floor(insertAt)) {
       throw new Error('config.insertAt must be a non-negative integer or null');

@@ -5,7 +5,7 @@ Standalone Google Apps Script that inserts song-file slides and builds scripture
 ## Deploy (one-time)
 
 1. At [script.google.com](https://script.google.com), signed in as Mark, create a new standalone project (not bound to a deck, not the add-on). Name it something like `Eastern Gate Slide Insert`.
-2. Replace the default `Code.gs` and add `appsscript.json` (View > Show manifest file if it is hidden) with the files in this folder.
+2. Replace the default `Code.gs`, add `RunToday.gs` and `TestSongs.gs`, and add `appsscript.json` (View > Show manifest file if it is hidden) with the files in this folder.
 3. Select `insertSongs` or `insertScriptures` and click Run. Approve the one-time Google authorization for Slides and external-request access when prompted. After that, the bot can run the script with no further prompts. If the project was already authorized for songs only, run it again so the new `script.external_request` scope can be approved.
 4. Optional, for Apps Script API `scripts.run`: Deploy > New deployment > type **API executable**, access **Only myself**. Note the script ID (Project Settings) and the deployment ID.
 
@@ -32,6 +32,12 @@ To avoid editing code: call `setSongConfig(config)` once, then `runFromPropertie
 
 - `insertAt` is a 0-based index. Use `null` (or omit it) only when the target still has a `<<songs section>>` marker slide: songs go right after the last existing song that follows that marker, or right after the marker if there are none. If there is no marker, `insertAt` is required.
 - `repeat` defaults to `1`. Each song’s every slide is copied, in original order, that many times back-to-back.
+- A song whose file has only one slide is never repeated: `repeat` is ignored and the manifest notes it.
+- `fileId` is accepted as an alias for `sourceId`. `insertAt` may also be `"end"` (or `-1`) to append.
+- `linkingMode` defaults to `"NOT_LINKED"` (plain copy; content, background, and speaker notes/chords come along). `"LINKED"` keeps each copy linked to the song file.
+- Positional form: `insertSongsAt(targetDeckId, [{fileId, repeat}], insertAfterIndex)`; `insertAfterIndex` is the 0-based slide the songs follow (`-1` = top, `null` = end).
+- Test: select `testSongs` (in `TestSongs.gs`) and click Run. It appends To Him Who Sits on the Throne (once) and Every Praise x2 to the scratch deck `ZZ-TEST-song-copy-2026-11-15`, and refuses to run on the real 2026-11-15 deck.
+- All song entries are validated before anything is inserted. If a copy fails partway, nothing is deleted; the partial manifest is logged.
 - `applyNotesFormat` defaults to `false`. If `true`, the font and size from the `<<songs section>>` marker’s speaker notes (the lyric/chord format note) are applied to inserted slides’ notes. Marker text itself is never copied onto inserted notes. Source-file notes are copied as-is, including any `<<` the song file already had; those slides are listed in `notesContainingChevrons`.
 
 ### Example: 2026-11-15 deck
