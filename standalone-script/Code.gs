@@ -14,8 +14,8 @@ var CHEVRON_RE = /<</;
 var ZZ_TEMPLATE_ID = '1mdlmL7xdlQBAvHKc1H7tyIBYSuW1gcv6BKBh5Q6TysQ';
 var ZZ_SCRIPTURE_SLIDE_ID = 'SLIDES_API1704141085_0';
 
-var WRAP_COLS = 30;
-var LINES_PER_SLIDE = 6;
+var WRAP_COLS = 28;
+var LINES_PER_SLIDE = 5;
 
 // ---------------------------------------------------------------------------
 // Songs
@@ -685,6 +685,7 @@ function paginatePassage_(verses, displayRef, verseNumbers) {
   var multiChapter = chapterCount > 1;
 
   var bodyLines = [];
+  var verseBlocks = [];
   for (var v = 0; v < verses.length; v++) {
     var verse = verses[v];
     var prefix = '';
@@ -694,6 +695,7 @@ function paginatePassage_(verses, displayRef, verseNumbers) {
         : verse.verse + ': ';
     }
     var wrapped = wrapToColumns_(prefix + verse.text, WRAP_COLS);
+    verseBlocks.push(wrapped);
     for (var w = 0; w < wrapped.length; w++) {
       bodyLines.push(wrapped[w]);
     }
@@ -705,34 +707,45 @@ function paginatePassage_(verses, displayRef, verseNumbers) {
   }
 
   var pages = [{ role: 'reference', text: displayRef }];
-  for (var start = 0; start < bodyLines.length; start += LINES_PER_SLIDE) {
-    var chunk = bodyLines.slice(start, start + LINES_PER_SLIDE);
-    pages.push({ role: 'text', text: chunk.join('\n') });
+  // Break pages at verse boundaries; split a verse only if it alone exceeds a page.
+  var chunk = [];
+  for (var b = 0; b < verseBlocks.length; b++) {
+    var block = verseBlocks[b];
+    if (chunk.length && chunk.length + block.length > LINES_PER_SLIDE) {
+      pages.push({ role: 'text', text: chunk.join('\n') });
+      chunk = [];
+    }
+    for (var k = 0; k < block.length; k++) {
+      if (chunk.length >= LINES_PER_SLIDE) {
+        pages.push({ role: 'text', text: chunk.join('\n') });
+        chunk = [];
+      }
+      chunk.push(block[k]);
+    }
   }
+  if (chunk.length) pages.push({ role: 'text', text: chunk.join('\n') });
   return pages;
 }
 
 function wrapToColumns_(text, maxChars) {
-  var words = String(text || '').trim().split(/\s+/);
+  // Respect existing line breaks (e.g. poetic lines from ESV), then word-wrap each.
+  var paras = String(text || '').split(/\n/);
   var lines = [];
-  var current = '';
-  for (var i = 0; i < words.length; i++) {
-    var word = words[i];
-    if (!word) {
-      continue;
-    }
-    var trial = current ? current + ' ' + word : word;
-    if (trial.length <= maxChars) {
-      current = trial;
-    } else {
-      if (current) {
-        lines.push(current);
+  for (var p = 0; p < paras.length; p++) {
+    var words = paras[p].trim().split(/\s+/);
+    var current = '';
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i];
+      if (!word) continue;
+      var trial = current ? current + ' ' + word : word;
+      if (trial.length <= maxChars) {
+        current = trial;
+      } else {
+        if (current) lines.push(current);
+        current = word;
       }
-      current = word;
     }
-  }
-  if (current) {
-    lines.push(current);
+    if (current) lines.push(current);
   }
   return lines;
 }
